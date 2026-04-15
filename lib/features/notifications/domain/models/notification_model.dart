@@ -30,11 +30,11 @@ class NotificationModel {
 
   Map<String, dynamic> toJson() {
     return {
-      if (id != null) 'id': id,
-      if (title != null) 'title': title,
-      if (body != null) 'body': body,
-      if (date != null) 'date': date,
-      if (userId != null) 'userId': userId,
+      'id': id,
+      'title': title,
+      'body': body,
+      'date': date,
+      'userId': userId,
       'isRead': isRead ? 1 : 0,
     };
   }
