@@ -4,7 +4,7 @@ import 'package:flutter/gestures.dart';
 class NoScrollGlowBehavior extends CupertinoScrollBehavior {
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    return const ClampingScrollPhysics();
+    return const BouncingScrollPhysics();
   }
 
   @override

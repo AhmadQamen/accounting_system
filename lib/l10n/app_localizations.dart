@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
-  /// **'Accounting'**
+  /// **'Accounting System'**
   String get appTitle;
 }
 

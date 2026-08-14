@@ -1,8 +1,7 @@
 import 'dart:developer';
-
+import 'package:dartz/dartz.dart';
 import 'package:accounting_system/core/errors/failures.dart';
 import 'package:accounting_system/core/utils/handle_failures.dart';
-import 'package:dartz/dartz.dart';
 
 mixin StatesHandler {
   ProviderStates failureOrDataToState<T>(
@@ -12,10 +11,8 @@ mixin StatesHandler {
   }) {
     return either.fold(
       (failure) {
-        if (handleF) {
-          handleFailure(failure);
-        }
         log(failure.message);
+        handleFailure(failure);
         return ErrorState(failure: failure);
       },
       (data) {
