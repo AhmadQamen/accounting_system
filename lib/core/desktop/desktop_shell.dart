@@ -1,10 +1,16 @@
+<<<<<<< HEAD
 import 'dart:io' show Platform;
 
+=======
+import 'package:accounting_system/core/desktop/breadcrumb_bar.dart';
+import 'package:accounting_system/core/desktop/desktop_sidebar.dart';
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 import 'package:accounting_system/core/keyboard/global_keyboard_listener.dart';
 import 'package:accounting_system/core/navigation/desktop_navigation_controller.dart';
 import 'package:accounting_system/core/navigation/route_builder.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+<<<<<<< HEAD
 import 'package:accounting_system/features/accounting/ui/screens/accounting_home.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -30,11 +36,20 @@ bool get isWindowsDesktop => !kIsWeb && Platform.isWindows;
 /// resolves it (go_router, the `DesktopNavigationController` you already
 /// have, etc). This widget only decides *whether* to wrap it with a
 /// sidebar, not *what* the page content is.
+=======
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+bool get isWindowsDesktop => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+<<<<<<< HEAD
     final colors = context.colors;
 
     if (!isWindowsDesktop) {
@@ -44,6 +59,13 @@ class AppShell extends ConsumerWidget {
 
     final route = ref.read(desktopNavControllerProvider).current;
 
+=======
+    final route = ref.watch(currentRouteProvider);
+    if (!isWindowsDesktop) {
+      return buildPage(route);
+    }
+    final colors = context.colors;
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
     return GlobalKeyboardListener(
       child: MyScaffold(
         forceWindowsBackground: true,
@@ -54,6 +76,7 @@ class AppShell extends ConsumerWidget {
             Expanded(
               child: Column(
                 children: [
+<<<<<<< HEAD
                   BreadcrumbBar(),
                   Expanded(
                     child: ClipRect(
@@ -69,6 +92,15 @@ class AppShell extends ConsumerWidget {
                           key: ValueKey(route.type),
                           child: buildPage(route),
                         ),
+=======
+                  const BreadcrumbBar(),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: KeyedSubtree(
+                        key: ValueKey(route.type),
+                        child: buildPage(route),
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
                       ),
                     ),
                   ),

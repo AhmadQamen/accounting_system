@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import 'package:accounting_system/core/theme/app_theme_colors.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
@@ -5,6 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shimmer/shimmer.dart';
 import 'core/theme/theme_extension.dart';
+=======
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:accounting_system/core/theme/app_theme_colors.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
+import 'package:shimmer/shimmer.dart';
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 
 /// Desktop breakpoint — matches the pattern used across the app.
 const double _kDesktopBreakpoint = 720;

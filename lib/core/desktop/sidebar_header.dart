@@ -8,8 +8,13 @@ import 'package:flutter/material.dart';
 class SidebarHeader extends StatelessWidget {
   const SidebarHeader({
     super.key,
+<<<<<<< HEAD
     this.appName = 'Pharma X',
     this.subtitle = 'Pharmacy Management',
+=======
+    this.appName = 'Accounting System',
+    this.subtitle = 'Offline Accounting',
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
   });
 
   final String appName;

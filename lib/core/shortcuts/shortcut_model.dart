@@ -164,10 +164,18 @@ final defaultShortcuts = [
     description: ShortcutAction.settings.description,
   ),
   ShortcutModel(
+<<<<<<< HEAD
     action: ShortcutAction.medicineRef,
     key: LogicalKeyboardKey.f12,
     keyLabel: 'F12',
     label: ShortcutAction.medicineRef.label,
     description: ShortcutAction.medicineRef.description,
+=======
+    action: ShortcutAction.reports,
+    key: LogicalKeyboardKey.f12,
+    keyLabel: 'F12',
+    label: ShortcutAction.reports.label,
+    description: ShortcutAction.reports.description,
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
   ),
 ];

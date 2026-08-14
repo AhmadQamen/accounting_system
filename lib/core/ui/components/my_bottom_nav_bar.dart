@@ -1,6 +1,12 @@
+<<<<<<< HEAD
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+=======
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 
 // ── DATA MODEL ────────────────────────────────────────────────────────────────
 class BottomNavItem {

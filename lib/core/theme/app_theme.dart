@@ -60,9 +60,13 @@ abstract final class AppTheme {
       extensions: const [ext],
       dividerColor: ext.border,
       textTheme: GoogleFonts.tajawalTextTheme(Typography.whiteCupertino),
+<<<<<<< HEAD
       primaryTextTheme: GoogleFonts.tajawalTextTheme(
         Typography.whiteCupertino,
       ),
+=======
+      primaryTextTheme: GoogleFonts.tajawalTextTheme(Typography.whiteCupertino),
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: true,
@@ -216,9 +220,13 @@ abstract final class AppTheme {
       extensions: const [ext],
       dividerColor: ext.border,
       textTheme: GoogleFonts.tajawalTextTheme(Typography.blackCupertino),
+<<<<<<< HEAD
       primaryTextTheme: GoogleFonts.tajawalTextTheme(
         Typography.blackCupertino,
       ),
+=======
+      primaryTextTheme: GoogleFonts.tajawalTextTheme(Typography.blackCupertino),
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: true,

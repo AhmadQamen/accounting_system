@@ -15,7 +15,11 @@ class DesktopNavigationController extends ChangeNotifier {
 
   final Ref ref;
 
+<<<<<<< HEAD
   final List<AppRoute> _stack = [AppRoute(type: RouteType.accounting)];
+=======
+  final List<AppRoute> _stack = [AppRoute(type: RouteType.dashboard)];
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 
   List<AppRoute> get stack => List.unmodifiable(_stack);
 

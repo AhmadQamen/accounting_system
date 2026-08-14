@@ -1,11 +1,19 @@
+<<<<<<< HEAD
 import 'dart:io' show Platform;
 import 'package:accounting_system/accounting_system.dart';
 import 'package:flutter/material.dart';
 import '../providers/app_providers.dart';
+=======
+import 'package:accounting_system/accounting_system.dart';
+import 'package:accounting_system/core/providers/app_providers.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 import 'app_navigator.dart';
 import 'app_route.dart';
 import 'desktop_navigation_controller.dart';
 import 'route_builder.dart';
+<<<<<<< HEAD
 import 'router.dart';
 
 /// Unified navigation — one call works on both desktop and mobile.
@@ -53,4 +61,12 @@ class AppNavigation {
       }
     }
   }
+=======
+
+class AppNavigation{
+ static bool get _desktop=>!kIsWeb&&defaultTargetPlatform==TargetPlatform.windows;
+ static void open(AppRoute route){if(_desktop){globalContainer.read(appNavigatorProvider).open(route);}else{final c=AccountingSystem.navigatorKey.currentContext;if(c!=null)Navigator.of(c).push(MaterialPageRoute(builder:(_)=>buildPage(route)));}}
+ static void openReplacement(AppRoute route){if(_desktop){globalContainer.read(desktopNavControllerProvider).replaceRoot(route);}else{final c=AccountingSystem.navigatorKey.currentContext;if(c!=null)Navigator.of(c).pushReplacement(MaterialPageRoute(builder:(_)=>buildPage(route)));}}
+ static void back(){if(_desktop){globalContainer.read(desktopNavControllerProvider).pop();}else{AccountingSystem.navigatorKey.currentState?.maybePop();}}
+>>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 }
