@@ -1,41 +1,54 @@
 class AppException implements Exception {
   final String message;
   final int statusCode;
-
-  const AppException(this.message, this.statusCode);
-
+  AppException(this.message, this.statusCode);
   @override
   String toString() => message;
 }
 
-class BadRequestException extends AppException {
-  const BadRequestException(String message) : super(message, 400);
+class ServerException extends AppException {
+  ServerException(String message) : super(message, 500);
 }
 
 class UnauthorizedException extends AppException {
-  const UnauthorizedException(String message) : super(message, 401);
+  UnauthorizedException(String message) : super(message, 401);
+}
+
+class SubscriptionRequiredException extends AppException {
+  SubscriptionRequiredException(String message) : super(message, 402);
+}
+
+class PermissionException extends AppException {
+  PermissionException(String message) : super(message, 403);
+}
+
+class ForceUpdateException extends AppException {
+  final String? updateType;
+  final String? latestVersionName;
+  final int? latestVersionCode;
+  final String? downloadUrl;
+
+  ForceUpdateException(
+    String message, {
+    this.updateType,
+    this.latestVersionName,
+    this.latestVersionCode,
+    this.downloadUrl,
+  }) : super(message, 403);
 }
 
 class NotFoundException extends AppException {
-  const NotFoundException(String message) : super(message, 404);
+  NotFoundException(String message) : super(message, 404);
 }
 
 class ValidationException extends AppException {
   final dynamic errors;
-
-  const ValidationException(String message, this.errors) : super(message, 422);
+  ValidationException(String message, this.errors) : super(message, 400);
 }
 
-class ServerException extends AppException {
-  const ServerException(String message) : super(message, 500);
-}
-
-class NetworkException extends AppException {
-  const NetworkException(String message) : super(message, 0);
-}
-
-class RateLimitException extends AppException {
-  final int retryAfterSeconds;
-  RateLimitException(String message, {this.retryAfterSeconds = 60})
-      : super(message, 429);
+class NetworkException implements Exception {
+  final String message;
+  const NetworkException(this.message);
+  @override
+  String toString() => message;
 }

@@ -1,9 +1,9 @@
-// lib/features/settings/presentation/controllers/settings_controller.dart
-import 'package:accounting_system/features/settings/domain/models/setting_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+
 import '../../data/repo/setting_repo.dart';
+import '../models/setting_model.dart';
 
 final settingsControllerProvider =
     StateNotifierProvider<SettingsNotifier, AppSettings>((ref) {
@@ -33,5 +33,10 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   void changeTheme(ThemeMode themeMode) {
     _saveAndUpdate(state.copyWith(themeMode: themeMode));
+  }
+
+  Future<void> toggleNotifications() async {
+    final enabled = !state.notificationsEnabled;
+    await _saveAndUpdate(state.copyWith(notificationsEnabled: enabled));
   }
 }
