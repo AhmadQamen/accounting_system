@@ -10,11 +10,7 @@ enum ShortcutAction {
   viewInventory,
   viewSuppliers,
   settings,
-<<<<<<< HEAD
-  medicineRef,
-=======
   reports,
->>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
 }
 
 extension ShortcutActionLabel on ShortcutAction {
@@ -42,13 +38,8 @@ extension ShortcutActionLabel on ShortcutAction {
         return 'الموردين';
       case ShortcutAction.settings:
         return 'الإعدادات';
-<<<<<<< HEAD
-      case ShortcutAction.medicineRef:
-        return 'مرجع الأدوية';
-=======
       case ShortcutAction.reports:
         return 'التقارير';
->>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
     }
   }
 
@@ -76,13 +67,8 @@ extension ShortcutActionLabel on ShortcutAction {
         return 'عرض قائمة الموردين';
       case ShortcutAction.settings:
         return 'فتح صفحة الإعدادات';
-<<<<<<< HEAD
-      case ShortcutAction.medicineRef:
-        return 'فتح نافذة البحث عن الأدوية';
-=======
       case ShortcutAction.reports:
         return 'فتح صفحة التقارير';
->>>>>>> 770ffb670390df62dfe8dc828f6b9370148ffb1e
     }
   }
 }
