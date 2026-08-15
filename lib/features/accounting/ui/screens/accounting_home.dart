@@ -5,6 +5,7 @@ import 'package:accounting_system/core/navigation/app_navigation.dart';
 import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -54,8 +55,7 @@ class _AccountingHomeState extends ConsumerState<AccountingHome>
         ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
     final colors = context.colors;
 
-    return Scaffold(
-      backgroundColor: colors.bgPage,
+    return MyScaffold(
       body: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),

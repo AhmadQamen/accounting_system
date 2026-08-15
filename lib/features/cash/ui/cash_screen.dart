@@ -1,110 +1,224 @@
+import 'dart:ui';
+
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:iconsax/iconsax.dart';
 
 enum CashScreenMode { cashboxes, expenses, transfers, sessions }
 
-class CashScreen extends ConsumerWidget {
+class CashScreen extends ConsumerStatefulWidget {
   const CashScreen({super.key, required this.mode});
   final CashScreenMode mode;
 
+  @override
+  ConsumerState<CashScreen> createState() => _CashScreenState();
+}
+
+class _CashScreenState extends ConsumerState<CashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entrance;
+  late Future<List<Map<String, Object?>>> _future;
+
+  CashScreenMode get mode => widget.mode;
+
   String get title => switch (mode) {
-        CashScreenMode.cashboxes => 'الصناديق',
-        CashScreenMode.expenses => 'المصروفات',
-        CashScreenMode.transfers => 'تحويلات الصندوق',
-        CashScreenMode.sessions => 'جلسات الصندوق',
-      };
+    CashScreenMode.cashboxes => 'الصناديق',
+    CashScreenMode.expenses => 'المصروفات',
+    CashScreenMode.transfers => 'تحويلات الصندوق',
+    CashScreenMode.sessions => 'جلسات الصندوق',
+  };
+
+  IconData get modeIcon => switch (mode) {
+    CashScreenMode.cashboxes => Iconsax.wallet_money,
+    CashScreenMode.expenses => Iconsax.money_send,
+    CashScreenMode.transfers => Iconsax.arrow_swap_horizontal,
+    CashScreenMode.sessions => Iconsax.timer_1,
+  };
+
+  String get fabLabel => switch (mode) {
+    CashScreenMode.cashboxes => 'صندوق جديد',
+    CashScreenMode.expenses => 'مصروف جديد',
+    CashScreenMode.transfers => 'تحويل جديد',
+    CashScreenMode.sessions => 'فتح جلسة',
+  };
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    _entrance = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..forward();
+    _future = _load(ref);
+  }
+
+  @override
+  void dispose() {
+    _entrance.dispose();
+    super.dispose();
+  }
+
+  Future<List<Map<String, Object?>>> _load(WidgetRef ref) => switch (mode) {
+    CashScreenMode.cashboxes =>
+      ref.read(cashRepositoryProvider).listCashboxes(),
+    CashScreenMode.expenses => ref.read(cashRepositoryProvider).listExpenses(),
+    CashScreenMode.transfers =>
+      ref.read(cashRepositoryProvider).listTransfers(),
+    CashScreenMode.sessions => ref.read(cashRepositoryProvider).listSessions(),
+  };
+
+  void _reload() {
+    setState(() => _future = _load(ref));
+    _entrance
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.watch(dataRevisionProvider);
-    final currency = ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      floatingActionButton: FloatingActionButton(onPressed: () => _action(context, ref), child: const Icon(Icons.add)),
+    final colors = context.colors;
+    final currency =
+        ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+
+    return MyScaffold(
+      appBar: _GlassAppBar(title: title, icon: modeIcon),
+      floatingActionButton: _GlowFab(
+        label: fabLabel,
+        onTap: () => _action(context, ref),
+      ),
       body: FutureBuilder<List<Map<String, Object?>>>(
-        future: _load(ref),
+        future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('${snapshot.error}'));
+          }
           final rows = snapshot.data ?? const <Map<String, Object?>>[];
-          if (rows.isEmpty) return const Center(child: Text('لا توجد بيانات'));
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: rows.length,
-            itemBuilder: (context, index) => _row(context, ref, rows[index], currency),
+          if (rows.isEmpty) {
+            return _EmptyState(icon: modeIcon, label: 'لا توجد بيانات بعد');
+          }
+          return RefreshIndicator(
+            color: colors.primary,
+            backgroundColor: colors.bgElevated,
+            onRefresh: () async {
+              _reload();
+              await _future;
+            },
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              itemCount: rows.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder:
+                  (context, index) => _AnimatedRow(
+                    controller: _entrance,
+                    index: index,
+                    total: rows.length,
+                    child: _row(context, ref, rows[index], currency),
+                  ),
+            ),
           );
         },
       ),
     );
   }
 
-  Future<List<Map<String, Object?>>> _load(WidgetRef ref) => switch (mode) {
-        CashScreenMode.cashboxes => ref.read(cashRepositoryProvider).listCashboxes(),
-        CashScreenMode.expenses => ref.read(cashRepositoryProvider).listExpenses(),
-        CashScreenMode.transfers => ref.read(cashRepositoryProvider).listTransfers(),
-        CashScreenMode.sessions => ref.read(cashRepositoryProvider).listSessions(),
-      };
+  Widget _row(
+    BuildContext context,
+    WidgetRef ref,
+    Map<String, Object?> row,
+    String currency,
+  ) {
+    final colors = context.colors;
+    String money(num v) => Money(v.toInt()).format(
+      locale: Localizations.localeOf(context).toString(),
+      currencyCode: currency,
+    );
 
-  Widget _row(BuildContext context, WidgetRef ref, Map<String, Object?> row, String currency) {
     if (mode == CashScreenMode.cashboxes) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(Icons.account_balance_wallet_outlined),
-          title: Text('${row['name']}'),
-          subtitle: const Text('الرصيد الحالي من دفتر حركات الصندوق'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(Money((row['current_balance_minor'] as num).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)),
-              PopupMenuButton<String>(
-                onSelected: (value) async {
-                  if (value == 'opening') await _openingBalance(context, ref, row['id'] as String);
-                  if (value == 'adjust') await _adjustment(context, ref, row['id'] as String);
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'opening', child: Text('رصيد افتتاحي')),
-                  PopupMenuItem(value: 'adjust', child: Text('تسوية الصندوق')),
-                ],
-              ),
-            ],
+      return _CashTile(
+        icon: Iconsax.wallet_2,
+        iconColor: colors.primary,
+        title: '${row['name']}',
+        subtitle: 'الرصيد الحالي من دفتر حركات الصندوق',
+        trailingValue: money(row['current_balance_minor'] as num),
+        trailingValueColor: colors.textPrimary,
+        onTap: () => _history(context, ref, row['id'] as String, currency),
+        menu: PopupMenuButton<String>(
+          icon: Icon(Iconsax.more, size: 18, color: colors.textSecondary),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
           ),
-          onTap: () => _history(context, ref, row['id'] as String, currency),
+          onSelected: (value) async {
+            if (value == 'opening') {
+              await _openingBalance(context, ref, row['id'] as String);
+            }
+            if (value == 'adjust') {
+              await _adjustment(context, ref, row['id'] as String);
+            }
+          },
+          itemBuilder:
+              (_) => const [
+                PopupMenuItem(value: 'opening', child: Text('رصيد افتتاحي')),
+                PopupMenuItem(value: 'adjust', child: Text('تسوية الصندوق')),
+              ],
         ),
       );
     }
+
     if (mode == CashScreenMode.expenses) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(Icons.payments_outlined),
-          title: Text('${row['expense_number']}'),
-          subtitle: Text('${row['cashbox_name']} • ${row['occurred_at']}'),
-          trailing: Text(Money((row['amount_minor'] as num).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)),
-        ),
+      return _CashTile(
+        icon: Iconsax.money_send,
+        iconColor: colors.error,
+        title: '${row['expense_number']}',
+        subtitle: '${row['cashbox_name']} • ${row['occurred_at']}',
+        trailingValue: '-${money(row['amount_minor'] as num)}',
+        trailingValueColor: colors.error,
       );
     }
+
     if (mode == CashScreenMode.transfers) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(Icons.swap_horiz),
-          title: Text('${row['transfer_number']}'),
-          subtitle: Text('${row['from_cashbox_name']} ← ${row['to_cashbox_name']} • ${row['occurred_at']}'),
-          trailing: Text(Money((row['amount_minor'] as num).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)),
-        ),
+      return _CashTile(
+        icon: Iconsax.arrow_swap_horizontal,
+        iconColor: colors.secondary,
+        title: '${row['transfer_number']}',
+        subtitle:
+            '${row['from_cashbox_name']} ← ${row['to_cashbox_name']} • ${row['occurred_at']}',
+        trailingValue: money(row['amount_minor'] as num),
+        trailingValueColor: colors.textPrimary,
       );
     }
+
     final open = row['status'] == 'open';
-    return Card(
-      child: ListTile(
-        leading: Icon(open ? Icons.lock_open : Icons.lock_outline),
-        title: Text('${row['cashbox_name']}'),
-        subtitle: Text('${row['status']} • ${row['opened_at']}'),
-        trailing: open ? const Chip(label: Text('مفتوحة')) : Text('فرق: ${row['difference_minor'] ?? 0}'),
-        onTap: open ? () => _closeSession(context, ref, row['id'] as String, currency) : null,
-      ),
+    return _CashTile(
+      icon: open ? Iconsax.unlock : Iconsax.lock_1,
+      iconColor: open ? colors.success : colors.textSecondary,
+      title: '${row['cashbox_name']}',
+      subtitle: '${row['status']} • ${row['opened_at']}',
+      trailingWidget:
+          open
+              ? _StatusChip(label: 'مفتوحة', color: colors.success)
+              : Text(
+                'فرق: ${row['difference_minor'] ?? 0}',
+                style: TextStyle(color: colors.textSecondary, fontSize: 13),
+              ),
+      onTap:
+          open
+              ? () => _closeSession(context, ref, row['id'] as String, currency)
+              : null,
     );
   }
+
+  // ================= منطق الأكشنز — بدون أي تغيير =================
 
   Future<void> _action(BuildContext context, WidgetRef ref) async {
     final boxes = await ref.read(cashRepositoryProvider).listCashboxes();
@@ -114,16 +228,20 @@ class CashScreen extends ConsumerWidget {
         final controller = TextEditingController();
         final ok = await showDialog<bool>(
           context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('صندوق جديد'),
-            content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'الاسم')),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('حفظ')),
-            ],
-          ),
+          builder:
+              (dialogContext) => _ThemedDialog(
+                title: 'صندوق جديد',
+                content: _ThemedField(controller: controller, label: 'الاسم'),
+                confirmLabel: 'حفظ',
+                onCancel: () => Navigator.pop(dialogContext, false),
+                onConfirm: () => Navigator.pop(dialogContext, true),
+              ),
         );
-        if (ok == true && controller.text.trim().isNotEmpty) await ref.read(masterDataRepositoryProvider).saveCashbox(name: controller.text);
+        if (ok == true && controller.text.trim().isNotEmpty) {
+          await ref
+              .read(masterDataRepositoryProvider)
+              .saveCashbox(name: controller.text);
+        }
         controller.dispose();
       } else if (boxes.isEmpty) {
         throw StateError('أضف صندوقاً أولاً');
@@ -131,8 +249,23 @@ class CashScreen extends ConsumerWidget {
         var box = boxes.first['id'] as String;
         final amount = TextEditingController();
         final note = TextEditingController();
-        final ok = await _moneyDialog(context, 'مصروف جديد', boxes, (value) => box = value, amount, note);
-        if (ok) await ref.read(cashRepositoryProvider).postExpense(cashboxId: box, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        final ok = await _moneyDialog(
+          context,
+          'مصروف جديد',
+          boxes,
+          (value) => box = value,
+          amount,
+          note,
+        );
+        if (ok) {
+          await ref
+              .read(cashRepositoryProvider)
+              .postExpense(
+                cashboxId: box,
+                amountMinor: Money.fromMajor(amount.text),
+                note: note.text,
+              );
+        }
         amount.dispose();
         note.dispose();
       } else if (mode == CashScreenMode.transfers) {
@@ -141,205 +274,354 @@ class CashScreen extends ConsumerWidget {
       } else {
         var box = boxes.first['id'] as String;
         final amount = TextEditingController(text: '0');
-        final ok = await _moneyDialog(context, 'فتح جلسة صندوق', boxes, (value) => box = value, amount, null);
-        if (ok) await ref.read(cashRepositoryProvider).openSession(cashboxId: box, openingAmountMinor: Money.fromMajor(amount.text));
+        final ok = await _moneyDialog(
+          context,
+          'فتح جلسة صندوق',
+          boxes,
+          (value) => box = value,
+          amount,
+          null,
+        );
+        if (ok) {
+          await ref
+              .read(cashRepositoryProvider)
+              .openSession(
+                cashboxId: box,
+                openingAmountMinor: Money.fromMajor(amount.text),
+              );
+        }
         amount.dispose();
       }
       ref.read(dataRevisionProvider.notifier).state++;
+      if (context.mounted) _reload();
     } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (context.mounted) _showError(context, '$e');
     }
   }
 
-  Future<void> _openingBalance(BuildContext context, WidgetRef ref, String cashboxId) async {
+  Future<void> _openingBalance(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+  ) async {
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('الرصيد الافتتاحي'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ؛ استخدم قيمة سالبة إن لزم')),
-              const SizedBox(height: 8),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'ملاحظة')),
-            ],
+      builder:
+          (dialogContext) => _ThemedDialog(
+            title: 'الرصيد الافتتاحي',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ThemedField(
+                  controller: amount,
+                  label: 'المبلغ؛ استخدم قيمة سالبة إن لزم',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 12),
+                _ThemedField(controller: note, label: 'ملاحظة'),
+              ],
+            ),
+            confirmLabel: 'اعتماد',
+            onCancel: () => Navigator.pop(dialogContext, false),
+            onConfirm: () => Navigator.pop(dialogContext, true),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('اعتماد')),
-        ],
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(cashRepositoryProvider).postOpeningBalance(cashboxId: cashboxId, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        await ref
+            .read(cashRepositoryProvider)
+            .postOpeningBalance(
+              cashboxId: cashboxId,
+              amountMinor: Money.fromMajor(amount.text),
+              note: note.text,
+            );
         ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     amount.dispose();
     note.dispose();
   }
 
-  Future<void> _adjustment(BuildContext context, WidgetRef ref, String cashboxId) async {
+  Future<void> _adjustment(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+  ) async {
     var direction = 'in';
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('تسوية الصندوق'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: direction,
-                  items: const [DropdownMenuItem(value: 'in', child: Text('زيادة')), DropdownMenuItem(value: 'out', child: Text('نقص'))],
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => direction = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'الاتجاه'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => _ThemedDialog(
+                  title: 'تسوية الصندوق',
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ThemedDropdown<String>(
+                        value: direction,
+                        label: 'الاتجاه',
+                        items: const {'in': 'زيادة', 'out': 'نقص'},
+                        onChanged: (value) {
+                          if (value != null) setLocal(() => direction = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _ThemedField(
+                        controller: amount,
+                        label: 'المبلغ',
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 12),
+                      _ThemedField(controller: note, label: 'سبب التسوية'),
+                    ],
+                  ),
+                  confirmLabel: 'اعتماد',
+                  onCancel: () => Navigator.pop(dialogContext, false),
+                  onConfirm: () => Navigator.pop(dialogContext, true),
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-                const SizedBox(height: 8),
-                TextField(controller: note, decoration: const InputDecoration(labelText: 'سبب التسوية')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('اعتماد')),
-          ],
-        ),
-      ),
     );
     if (ok == true && note.text.trim().isNotEmpty) {
       try {
-        await ref.read(cashRepositoryProvider).postAdjustment(cashboxId: cashboxId, direction: direction, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        await ref
+            .read(cashRepositoryProvider)
+            .postAdjustment(
+              cashboxId: cashboxId,
+              direction: direction,
+              amountMinor: Money.fromMajor(amount.text),
+              note: note.text,
+            );
         ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     amount.dispose();
     note.dispose();
   }
 
-  Future<void> _history(BuildContext context, WidgetRef ref, String cashboxId, String currency) async {
-    final rows = await ref.read(cashRepositoryProvider).transactionHistory(cashboxId: cashboxId);
+  Future<void> _history(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+    String currency,
+  ) async {
+    final rows = await ref
+        .read(cashRepositoryProvider)
+        .transactionHistory(cashboxId: cashboxId);
     if (!context.mounted) return;
+    final colors = context.colors;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760, maxHeight: 650),
-          child: Column(
-            children: [
-              AppBar(title: const Text('حركات الصندوق'), automaticallyImplyLeading: false, actions: [IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close))]),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: rows.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    final amount = (row['amount_minor'] as num).toInt();
-                    return ListTile(
-                      leading: Icon(row['direction'] == 'in' ? Icons.south_west : Icons.north_east),
-                      title: Text('${row['kind']}'),
-                      subtitle: Text('${row['occurred_at']} • ${row['party_name'] ?? ''}'),
-                      trailing: Text('${row['direction'] == 'in' ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}'),
-                    );
-                  },
-                ),
+      builder:
+          (dialogContext) => Dialog(
+            backgroundColor: colors.bgElevated,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+              side: BorderSide(color: colors.border, width: .5),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760, maxHeight: 650),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 12, 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Iconsax.receipt_text,
+                          color: colors.primary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'حركات الصندوق',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          icon: Icon(
+                            Iconsax.close_circle,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, color: colors.border),
+                  Expanded(
+                    child:
+                        rows.isEmpty
+                            ? _EmptyState(
+                              icon: Iconsax.document,
+                              label: 'لا توجد حركات',
+                            )
+                            : ListView.separated(
+                              padding: const EdgeInsets.all(12),
+                              itemCount: rows.length,
+                              separatorBuilder:
+                                  (_, __) => const SizedBox(height: 6),
+                              itemBuilder: (context, index) {
+                                final row = rows[index];
+                                final amount =
+                                    (row['amount_minor'] as num).toInt();
+                                final isIn = row['direction'] == 'in';
+                                return _CashTile(
+                                  dense: true,
+                                  icon:
+                                      isIn
+                                          ? Iconsax.import_1
+                                          : Iconsax.export_1,
+                                  iconColor:
+                                      isIn ? colors.success : colors.error,
+                                  title: '${row['kind']}',
+                                  subtitle:
+                                      '${row['occurred_at']} • ${row['party_name'] ?? ''}',
+                                  trailingValue:
+                                      '${isIn ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
+                                  trailingValueColor:
+                                      isIn ? colors.success : colors.error,
+                                );
+                              },
+                            ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
     );
   }
 
-  Future<void> _transfer(BuildContext context, WidgetRef ref, List<Map<String, Object?>> boxes) async {
+  Future<void> _transfer(
+    BuildContext context,
+    WidgetRef ref,
+    List<Map<String, Object?>> boxes,
+  ) async {
     var from = boxes.first['id'] as String;
     var to = boxes[1]['id'] as String;
     final amount = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('تحويل بين الصناديق'),
-          content: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: from,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => from = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'من صندوق'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => _ThemedDialog(
+                  title: 'تحويل بين الصناديق',
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ThemedDropdown<String>(
+                        value: from,
+                        label: 'من صندوق',
+                        items: {
+                          for (final e in boxes)
+                            e['id'] as String: '${e['name']}',
+                        },
+                        onChanged: (value) {
+                          if (value != null) setLocal(() => from = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _ThemedDropdown<String>(
+                        value: to,
+                        label: 'إلى صندوق',
+                        items: {
+                          for (final e in boxes)
+                            e['id'] as String: '${e['name']}',
+                        },
+                        onChanged: (value) {
+                          if (value != null) setLocal(() => to = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _ThemedField(
+                        controller: amount,
+                        label: 'المبلغ',
+                        keyboardType: TextInputType.number,
+                      ),
+                    ],
+                  ),
+                  confirmLabel: 'تحويل',
+                  onCancel: () => Navigator.pop(dialogContext, false),
+                  onConfirm: () => Navigator.pop(dialogContext, true),
                 ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: to,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => to = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'إلى صندوق'),
-                ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('تحويل')),
-          ],
-        ),
-      ),
-    );
-    if (ok == true) await ref.read(cashRepositoryProvider).postTransfer(fromCashboxId: from, toCashboxId: to, amountMinor: Money.fromMajor(amount.text));
-    amount.dispose();
-  }
-
-  Future<void> _closeSession(BuildContext context, WidgetRef ref, String sessionId, String currency) async {
-    final counted = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إغلاق جلسة الصندوق'),
-        content: TextField(controller: counted, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ المعدود فعلياً')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('إغلاق')),
-        ],
-      ),
     );
     if (ok == true) {
       try {
-        final result = await ref.read(cashRepositoryProvider).closeSession(sessionId: sessionId, countedAmountMinor: Money.fromMajor(counted.text));
+        await ref
+            .read(cashRepositoryProvider)
+            .postTransfer(
+              fromCashboxId: from,
+              toCashboxId: to,
+              amountMinor: Money.fromMajor(amount.text),
+            );
+        ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
+      } catch (e) {
+        if (context.mounted) _showError(context, '$e');
+      }
+    }
+    amount.dispose();
+  }
+
+  Future<void> _closeSession(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId,
+    String currency,
+  ) async {
+    final counted = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => _ThemedDialog(
+            title: 'إغلاق جلسة الصندوق',
+            content: _ThemedField(
+              controller: counted,
+              label: 'المبلغ المعدود فعلياً',
+              keyboardType: TextInputType.number,
+            ),
+            confirmLabel: 'إغلاق',
+            onCancel: () => Navigator.pop(dialogContext, false),
+            onConfirm: () => Navigator.pop(dialogContext, true),
+          ),
+    );
+    if (ok == true) {
+      try {
+        final result = await ref
+            .read(cashRepositoryProvider)
+            .closeSession(
+              sessionId: sessionId,
+              countedAmountMinor: Money.fromMajor(counted.text),
+            );
         ref.read(dataRevisionProvider.notifier).state++;
         if (context.mounted) {
-          final expected = Money(result['expected']!).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
-          final difference = Money(result['difference']!).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('المتوقع: $expected • الفرق: $difference')));
+          _reload();
+          final expected = Money(result['expected']!).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
+          );
+          final difference = Money(result['difference']!).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
+          );
+          _showInfo(context, 'المتوقع: $expected • الفرق: $difference');
         }
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     counted.dispose();
@@ -356,47 +638,551 @@ class CashScreen extends ConsumerWidget {
     var box = boxes.first['id'] as String;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text(title),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: box,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setLocal(() => box = value);
-                      onBox(value);
-                    }
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => _ThemedDialog(
+                  title: title,
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ThemedDropdown<String>(
+                        value: box,
+                        label: 'الصندوق',
+                        items: {
+                          for (final e in boxes)
+                            e['id'] as String: '${e['name']}',
+                        },
+                        onChanged: (value) {
+                          if (value != null) {
+                            setLocal(() => box = value);
+                            onBox(value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _ThemedField(
+                        controller: amount,
+                        label: 'المبلغ',
+                        keyboardType: TextInputType.number,
+                      ),
+                      if (note != null) ...[
+                        const SizedBox(height: 12),
+                        _ThemedField(controller: note, label: 'ملاحظة'),
+                      ],
+                    ],
+                  ),
+                  confirmLabel: 'اعتماد',
+                  onCancel: () => Navigator.pop(dialogContext, false),
+                  onConfirm: () {
+                    onBox(box);
+                    Navigator.pop(dialogContext, true);
                   },
-                  decoration: const InputDecoration(labelText: 'الصندوق'),
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-                if (note != null) ...[
-                  const SizedBox(height: 8),
-                  TextField(controller: note, decoration: const InputDecoration(labelText: 'ملاحظة')),
-                ],
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(
-              onPressed: () {
-                onBox(box);
-                Navigator.pop(dialogContext, true);
-              },
-              child: const Text('اعتماد'),
-            ),
-          ],
+    );
+    return ok == true;
+  }
+
+  void _showError(BuildContext context, String message) {
+    final colors = context.colors;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Text(message),
+      ),
+    );
+  }
+
+  void _showInfo(BuildContext context, String message) {
+    final colors = context.colors;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.bgElevated,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: colors.border, width: .5),
+        ),
+        content: Text(message, style: TextStyle(color: colors.textPrimary)),
+      ),
+    );
+  }
+}
+
+// =====================================================================
+// 🧩 UI Components — كل شي هون واجهة بس، ما في منطق أعمال
+// =====================================================================
+
+class _GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const _GlassAppBar({required this.title, required this.icon});
+  final String title;
+  final IconData icon;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: AppBar(
+          backgroundColor: colors.bgPage.withValues(alpha: .82),
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          shape: Border(bottom: BorderSide(color: colors.border, width: .5)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.primary.withValues(alpha: .16),
+                ),
+                child: Icon(icon, size: 18, color: colors.primary),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: colors.textPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
-    return ok == true;
+  }
+}
+
+class _GlowFab extends StatefulWidget {
+  const _GlowFab({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_GlowFab> createState() => _GlowFabState();
+}
+
+class _GlowFabState extends State<_GlowFab> {
+  bool _hover = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : (_hover ? 1.03 : 1.0),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: LinearGradient(
+                colors: [
+                  colors.primary.withValues(alpha: _hover ? 1 : .92),
+                  colors.secondary.withValues(alpha: _hover ? .9 : .8),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.primary.withValues(alpha: _hover ? .35 : .22),
+                  blurRadius: _hover ? 22 : 14,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Iconsax.add, size: 18, color: Colors.black87),
+                const SizedBox(width: 8),
+                Text(
+                  widget.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedRow extends StatelessWidget {
+  const _AnimatedRow({
+    required this.controller,
+    required this.index,
+    required this.total,
+    required this.child,
+  });
+  final AnimationController controller;
+  final int index;
+  final int total;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final clampedTotal = total.clamp(1, 12);
+    final start = (index / clampedTotal) * 0.5;
+    final end = (start + 0.5).clamp(0.0, 1.0);
+    final anim = CurvedAnimation(
+      parent: controller,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+    return FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.06),
+          end: Offset.zero,
+        ).animate(anim),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _CashTile extends StatefulWidget {
+  const _CashTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    this.trailingValue,
+    this.trailingValueColor,
+    this.trailingWidget,
+    this.menu,
+    this.onTap,
+    this.dense = false,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final String? trailingValue;
+  final Color? trailingValueColor;
+  final Widget? trailingWidget;
+  final Widget? menu;
+  final VoidCallback? onTap;
+  final bool dense;
+
+  @override
+  State<_CashTile> createState() => _CashTileState();
+}
+
+class _CashTileState extends State<_CashTile> {
+  bool _hover = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tappable = widget.onTap != null;
+
+    return MouseRegion(
+      onEnter: tappable ? (_) => setState(() => _hover = true) : null,
+      onExit: tappable ? (_) => setState(() => _hover = false) : null,
+      cursor: tappable ? SystemMouseCursors.click : MouseCursor.defer,
+      child: GestureDetector(
+        onTapDown: tappable ? (_) => setState(() => _pressed = true) : null,
+        onTapCancel: tappable ? () => setState(() => _pressed = false) : null,
+        onTapUp: tappable ? (_) => setState(() => _pressed = false) : null,
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _pressed ? 0.99 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: widget.dense ? 10 : 14,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: colors.bgElevated,
+              border: Border.all(
+                color:
+                    _hover
+                        ? widget.iconColor.withValues(alpha: .4)
+                        : colors.border,
+                width: .5,
+              ),
+              boxShadow:
+                  _hover
+                      ? [
+                        BoxShadow(
+                          color: widget.iconColor.withValues(alpha: .12),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ]
+                      : [],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(widget.dense ? 8 : 10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: widget.iconColor.withValues(
+                      alpha: _hover ? .22 : .14,
+                    ),
+                  ),
+                  child: Icon(
+                    widget.icon,
+                    color: widget.iconColor,
+                    size: widget.dense ? 16 : 20,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                          fontSize: widget.dense ? 14 : 15,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.trailingWidget != null)
+                  widget.trailingWidget!
+                else if (widget.trailingValue != null)
+                  Text(
+                    widget.trailingValue!,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: widget.trailingValueColor ?? colors.textPrimary,
+                    ),
+                  ),
+                if (widget.menu != null) widget.menu!,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: .4), width: .5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 40,
+            color: colors.textSecondary.withValues(alpha: .5),
+          ),
+          const SizedBox(height: 12),
+          Text(label, style: TextStyle(color: colors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemedDialog extends StatelessWidget {
+  const _ThemedDialog({
+    required this.title,
+    required this.content,
+    required this.confirmLabel,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+  final String title;
+  final Widget content;
+  final String confirmLabel;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AlertDialog(
+      backgroundColor: colors.bgElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: colors.border, width: .5),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          color: colors.textPrimary,
+        ),
+      ),
+      content: SizedBox(width: 420, child: content),
+      actions: [
+        TextButton(
+          onPressed: onCancel,
+          child: Text('إلغاء', style: TextStyle(color: colors.textSecondary)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: Colors.black87,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: onConfirm,
+          child: Text(confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemedField extends StatelessWidget {
+  const _ThemedField({
+    required this.controller,
+    required this.label,
+    this.keyboardType,
+  });
+  final TextEditingController controller;
+  final String label;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: TextStyle(color: colors.textPrimary),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: colors.textSecondary),
+        filled: true,
+        fillColor: colors.bgPage,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.primary, width: 1),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemedDropdown<T> extends StatelessWidget {
+  const _ThemedDropdown({
+    required this.value,
+    required this.label,
+    required this.items,
+    required this.onChanged,
+  });
+  final T value;
+  final String label;
+  final Map<T, String> items;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DropdownButtonFormField<T>(
+      value: value,
+      dropdownColor: colors.bgElevated,
+      style: TextStyle(color: colors.textPrimary),
+      items:
+          items.entries
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+              .toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: colors.textSecondary),
+        filled: true,
+        fillColor: colors.bgPage,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+      ),
+    );
   }
 }
