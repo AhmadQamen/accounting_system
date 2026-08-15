@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:accounting_system/core/configs/uuid.dart';
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/db/local_context.dart';
+import 'package:accounting_system/core/sync/sync_models.dart';
 import 'package:accounting_system/core/utils/app_logger.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -53,19 +54,19 @@ class SyncEngine {
   final AppDatabase _database;
   final SyncTransport _transport;
 
-  Future<Map<String, Object?>> status() async {
+  Future<SyncStatus> status() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final pending = await db.rawQuery("SELECT COUNT(*) c FROM sync_outbox WHERE entity_id=? AND status IN ('pending','failed')", [ctx.entityId]);
     final conflicts = await db.rawQuery("SELECT COUNT(*) c FROM sync_conflicts WHERE entity_id=? AND status='open'", [ctx.entityId]);
     final device = await db.query('devices', columns: ['last_sync_at','last_pulled_server_seq'], where: 'id=?', whereArgs: [ctx.deviceId], limit: 1);
-    return {
-      'pending': (pending.first['c'] as num).toInt(),
-      'conflicts': (conflicts.first['c'] as num).toInt(),
-      'last_sync_at': device.isEmpty ? null : device.first['last_sync_at'],
-      'last_server_seq': device.isEmpty ? 0 : device.first['last_pulled_server_seq'],
-      'backend_configured': _transport is! DisabledSyncTransport,
-    };
+    return SyncStatus(
+      pending: (pending.first['c'] as num).toInt(),
+      conflicts: (conflicts.first['c'] as num).toInt(),
+      lastSyncAt: device.isEmpty ? null : DateTime.tryParse('${device.first['last_sync_at'] ?? ''}'),
+      lastServerSeq: device.isEmpty ? 0 : ((device.first['last_pulled_server_seq'] as num?) ?? 0).toInt(),
+      backendConfigured: _transport is! DisabledSyncTransport,
+    );
   }
 
   Future<void> syncNow() async {

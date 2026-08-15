@@ -1,9 +1,12 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 
 class WarehousesScreen extends ConsumerWidget {
   const WarehousesScreen({super.key});
@@ -11,10 +14,9 @@ class WarehousesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataRevisionProvider);
-    final compact = MediaQuery.sizeOf(context).width < 900;
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: compact ? AppBar(title: const Text('المستودعات')) : null,
+    final compact = showCompactPageAppBar(context);
+    return MyScaffold(
+      appBar: compact ? const BlurAppBar(title: Text('المستودعات')) : null,
       body: PremiumPage(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -31,12 +33,12 @@ class WarehousesScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 20),
-            FutureBuilder<List<Map<String, Object?>>>(
+            FutureBuilder<List<Warehouse>>(
               future: ref.read(masterDataRepositoryProvider).listWarehouses(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) return const SizedBox(height: 320, child: Center(child: CircularProgressIndicator()));
                 if (snapshot.hasError) return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل المستودعات', subtitle: '${snapshot.error}');
-                final rows = snapshot.data ?? const <Map<String, Object?>>[];
+                final rows = snapshot.data ?? const <Warehouse>[];
                 return AnimatedEntrance(
                   delay: const Duration(milliseconds: 90),
                   child: PremiumPanel(
@@ -70,13 +72,13 @@ class WarehousesScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _edit(BuildContext context, WidgetRef ref, {Map<String, Object?>? row}) async {
-    final controller = TextEditingController(text: row?['name']?.toString() ?? '');
+  Future<void> _edit(BuildContext context, WidgetRef ref, {Warehouse? row}) async {
+    final controller = TextEditingController(text: row?.name ?? '');
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Row(children: [Icon(Iconsax.buildings_2, color: context.colors.primary), const SizedBox(width: 10), Text(row == null ? 'مستودع جديد' : 'تعديل المستودع')]),
-        content: SizedBox(width: 430, child: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'اسم المستودع', prefixIcon: Icon(Iconsax.buildings_2)))),
+        content: SizedBox(width: responsiveDialogWidth(context, 430), child: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'اسم المستودع', prefixIcon: Icon(Iconsax.buildings_2)))),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
           FilledButton.icon(onPressed: () => Navigator.pop(dialogContext, true), icon: const Icon(Iconsax.tick_circle, size: 17), label: const Text('حفظ')),
@@ -84,13 +86,13 @@ class WarehousesScreen extends ConsumerWidget {
       ),
     );
     if (ok == true && controller.text.trim().isNotEmpty) {
-      await ref.read(masterDataRepositoryProvider).saveWarehouse(id: row?['id'] as String?, name: controller.text);
+      await ref.read(masterDataRepositoryProvider).saveWarehouse(id: row?.id, name: controller.text);
       ref.read(dataRevisionProvider.notifier).state++;
     }
     controller.dispose();
   }
 
-  Future<void> _archive(BuildContext context, WidgetRef ref, Map<String, Object?> row) async {
+  Future<void> _archive(BuildContext context, WidgetRef ref, Warehouse row) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -104,7 +106,7 @@ class WarehousesScreen extends ConsumerWidget {
     );
     if (confirmed == true) {
       try {
-        await ref.read(masterDataRepositoryProvider).archiveWarehouse(row['id'] as String);
+        await ref.read(masterDataRepositoryProvider).archiveWarehouse(row.id!);
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
         if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -115,7 +117,7 @@ class WarehousesScreen extends ConsumerWidget {
 
 class _WarehouseRow extends StatelessWidget {
   const _WarehouseRow({required this.row, required this.showDivider, required this.onEdit, required this.onArchive});
-  final Map<String, Object?> row;
+  final Warehouse row;
   final bool showDivider;
   final VoidCallback onEdit;
   final VoidCallback onArchive;
@@ -127,21 +129,35 @@ class _WarehouseRow extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          child: Row(
-            children: [
-              Container(width: 42, height: 42, decoration: BoxDecoration(color: colors.primary.withValues(alpha: .10), borderRadius: BorderRadius.circular(14)), child: Icon(Iconsax.buildings_2, color: colors.primary, size: 20)),
-              const SizedBox(width: 12),
-              Expanded(child: Text('${row['name']}', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13))),
-              StatusPill(label: 'نشط', color: colors.success, compact: true),
-              const SizedBox(width: 6),
-              PopupMenuButton<String>(
-                onSelected: (value) { if (value == 'edit') onEdit(); if (value == 'archive') onArchive(); },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('تعديل'), dense: true)),
-                  PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined), title: Text('أرشفة'), dense: true)),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 420;
+              final identity = Row(
+                children: [
+                  Container(width: 42, height: 42, decoration: BoxDecoration(color: colors.primary.withValues(alpha: .10), borderRadius: BorderRadius.circular(14)), child: Icon(Iconsax.buildings_2, color: colors.primary, size: 20)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(row.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13))),
                 ],
-              ),
-            ],
+              );
+              final actions = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  StatusPill(label: 'نشط', color: colors.success, compact: true),
+                  const SizedBox(width: 4),
+                  PopupMenuButton<String>(
+                    onSelected: (value) { if (value == 'edit') onEdit(); if (value == 'archive') onArchive(); },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('تعديل'), dense: true)),
+                      PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined), title: Text('أرشفة'), dense: true)),
+                    ],
+                  ),
+                ],
+              );
+              if (compact) {
+                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [identity, const SizedBox(height: 6), Align(alignment: AlignmentDirectional.centerEnd, child: actions)]);
+              }
+              return Row(children: [Expanded(child: identity), const SizedBox(width: 8), actions]);
+            },
           ),
         ),
         if (showDivider) Divider(height: 1, color: colors.border),

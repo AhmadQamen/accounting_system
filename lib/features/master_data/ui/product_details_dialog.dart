@@ -1,10 +1,12 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class ProductDetailsDialog extends ConsumerStatefulWidget {
   const ProductDetailsDialog({super.key, required this.product});
-  final Map<String, Object?> product;
+  final Product product;
 
   @override
   ConsumerState<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
@@ -15,7 +17,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final productId = widget.product['id'] as String;
+    final productId = widget.product.id!;
     return Dialog(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760, maxHeight: 720),
@@ -28,7 +30,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      '${widget.product['name']}',
+                      widget.product.name,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
@@ -37,7 +39,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: FutureBuilder<List<List<Map<String, Object?>>>>(
+                child: FutureBuilder<ProductDetailsData>(
                   key: ValueKey(revision),
                   future: _load(productId),
                   builder: (context, snapshot) {
@@ -46,28 +48,28 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                     }
                     if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
                     final data = snapshot.data!;
-                    final units = data[0];
-                    final barcodes = data[1];
-                    final specs = data[2];
+                    final units = data.units;
+                    final barcodes = data.barcodes;
+                    final specs = data.specifications;
                     return ListView(
                       children: [
                         _sectionHeader('الوحدات', () => _addUnit(productId)),
                         ...units.map(
                           (u) => ListTile(
-                            leading: Icon((u['is_primary'] as num).toInt() == 1 ? Icons.star : Icons.straighten),
-                            title: Text('${u['name']}'),
-                            subtitle: Text('عامل التحويل: ${u['factor']}'),
-                            trailing: (u['is_primary'] as num).toInt() == 1 ? const Chip(label: Text('رئيسية')) : null,
+                            leading: Icon(u.isPrimary ? Icons.star : Icons.straighten),
+                            title: Text(u.name),
+                            subtitle: Text('عامل التحويل: ${u.factor}'),
+                            trailing: u.isPrimary ? const Chip(label: Text('رئيسية')) : null,
                           ),
                         ),
                         const Divider(),
                         _sectionHeader('الباركود', units.isEmpty ? null : () => _addBarcode(units)),
                         if (barcodes.isEmpty) const ListTile(title: Text('لا توجد باركودات')),
-                        ...barcodes.map((b) => ListTile(leading: const Icon(Icons.qr_code), title: Text('${b['code']}'), subtitle: Text('${b['unit_name']}'))),
+                        ...barcodes.map((b) => ListTile(leading: const Icon(Icons.qr_code), title: Text(b.code), subtitle: Text(b.unitName ?? ''))),
                         const Divider(),
                         _sectionHeader('المواصفات', () => _addSpecification(productId)),
                         if (specs.isEmpty) const ListTile(title: Text('لا توجد مواصفات')),
-                        ...specs.map((s) => ListTile(title: Text('${s['title']}'), trailing: Text('${s['value']}'))),
+                        ...specs.map((s) => ListTile(title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(s.value, maxLines: 3, overflow: TextOverflow.ellipsis))),
                       ],
                     );
                   },
@@ -90,13 +92,16 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
         ),
       );
 
-  Future<List<List<Map<String, Object?>>>> _load(String productId) async {
+  Future<ProductDetailsData> _load(String productId) async {
     final repo = ref.read(masterDataRepositoryProvider);
-    return Future.wait([
-      repo.listProductUnits(productId),
-      repo.listBarcodes(productId),
-      repo.listProductSpecifications(productId),
-    ]);
+    final unitsFuture = repo.listProductUnits(productId);
+    final barcodesFuture = repo.listBarcodes(productId);
+    final specificationsFuture = repo.listProductSpecifications(productId);
+    return ProductDetailsData(
+      units: await unitsFuture,
+      barcodes: await barcodesFuture,
+      specifications: await specificationsFuture,
+    );
   }
 
   Future<void> _addUnit(String productId) async {
@@ -109,7 +114,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
         builder: (dialogContext, setLocal) => AlertDialog(
           title: const Text('إضافة وحدة'),
           content: SizedBox(
-            width: 420,
+            width: responsiveDialogWidth(context, 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -150,8 +155,8 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     factor.dispose();
   }
 
-  Future<void> _addBarcode(List<Map<String, Object?>> units) async {
-    var unitId = units.first['id'] as String;
+  Future<void> _addBarcode(List<ProductUnit> units) async {
+    var unitId = units.first.id!;
     final code = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -159,13 +164,13 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
         builder: (dialogContext, setLocal) => AlertDialog(
           title: const Text('إضافة باركود'),
           content: SizedBox(
-            width: 420,
+            width: responsiveDialogWidth(context, 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: unitId,
-                  items: units.map((u) => DropdownMenuItem(value: u['id'] as String, child: Text('${u['name']}'))).toList(),
+                  items: units.map((u) => DropdownMenuItem(value: u.id!, child: Text(u.name))).toList(),
                   onChanged: (v) {
                     if (v != null) setLocal(() => unitId = v);
                   },
@@ -203,7 +208,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('إضافة مواصفة'),
         content: SizedBox(
-          width: 420,
+          width: responsiveDialogWidth(context, 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

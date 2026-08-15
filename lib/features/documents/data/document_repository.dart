@@ -7,6 +7,7 @@ import 'package:accounting_system/core/services/cash_ledger_service.dart';
 import 'package:accounting_system/core/services/inventory_ledger_service.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
 import 'package:accounting_system/core/services/party_ledger_service.dart';
+import 'package:accounting_system/features/documents/models/document_models.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DocumentRepository {
@@ -17,7 +18,7 @@ class DocumentRepository {
   final _party = const PartyLedgerService();
   final _outbox = const OutboxService();
 
-  Future<List<Map<String, Object?>>> listDocuments(String type) async {
+  Future<List<AccountingDocument>> listDocuments(String type) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final table = _tableForType(type);
@@ -30,20 +31,22 @@ class DocumentRepository {
       _ => 'id',
     };
     if (type == 'waste') {
-      return db.rawQuery('''
+      final rows = await db.rawQuery('''
 SELECT d.*, d.$numberCol AS display_number, NULL AS party_name
 FROM $table d
 WHERE d.entity_id=? AND d.deleted_at IS NULL
 ORDER BY d.occurred_at DESC LIMIT 500
 ''', [ctx.entityId]);
+      return rows.map((row) => AccountingDocument.fromSql(row, type: type)).toList(growable: false);
     }
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT d.*, d.$numberCol AS display_number, p.name AS party_name
 FROM $table d
 LEFT JOIN parties p ON p.id=d.party_id
 WHERE d.entity_id=? AND d.deleted_at IS NULL
 ORDER BY d.occurred_at DESC LIMIT 500
 ''', [ctx.entityId]);
+    return rows.map((row) => AccountingDocument.fromSql(row, type: type)).toList(growable: false);
   }
 
   Future<String> createSaleDraft({
@@ -73,7 +76,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
         'occurred_at': now.toIso8601String(), 'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String(),
       });
       for (final item in items) {
-        await txn.insert('sale_items', item.toSaleRow(entityId: ctx.entityId, saleId: id, now: now));
+        await txn.insert('sale_items', item.toSql(entityId: ctx.entityId, saleId: id, now: now));
       }
       await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'sale', aggregateId: id, action: 'draft', payload: await _aggregatePayload(txn, type: 'sale', id: id));
     });
@@ -163,7 +166,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
         'note': note, 'occurred_at': now.toIso8601String(), 'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String(),
       });
       for (final item in items) {
-        await txn.insert('purchase_items', item.toPurchaseRow(entityId: ctx.entityId, purchaseId: id, now: now));
+        await txn.insert('purchase_items', item.toSql(entityId: ctx.entityId, purchaseId: id, now: now));
       }
       await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'purchase', aggregateId: id, action: 'draft', payload: await _aggregatePayload(txn, type: 'purchase', id: id));
     });
@@ -678,7 +681,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
     });
   }
 
-  Future<Map<String, Object?>> documentDetails(String type, String id) async {
+  Future<DocumentDetails> documentDetails(String type, String id) async {
     final db = await _database.database;
     final table = _tableForType(type);
     final header = await _single(db, table, id);
@@ -697,7 +700,10 @@ LEFT JOIN product_units u ON u.id=i.product_unit_id
 WHERE i.$fk=?
 ORDER BY i.created_at ASC
 ''', [id]);
-    return {'header': header, 'items': items};
+    return DocumentDetails(
+      header: AccountingDocument.fromSql(header, type: type),
+      items: items.map(DocumentLine.fromSql).toList(growable: false),
+    );
   }
 
   Future<Map<String, Object?>> _aggregatePayload(
@@ -788,47 +794,4 @@ ORDER BY i.created_at ASC
   }
 
   String _number(String prefix, String deviceId, DateTime now) => '$prefix-${deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
-}
-
-class SaleLineInput {
-  const SaleLineInput({required this.inventoryItemId, required this.productUnitId, required this.quantity, required this.unitFactor, required this.unitPriceMinor, this.lineDiscountMinor = 0});
-  final String inventoryItemId;
-  final String productUnitId;
-  final double quantity;
-  final double unitFactor;
-  final int unitPriceMinor;
-  final int lineDiscountMinor;
-  double get baseQuantity => quantity * unitFactor;
-  int get lineTotalMinor => Money.multiplyByQuantity(unitPriceMinor, quantity) - lineDiscountMinor;
-  Map<String, Object?> toSaleRow({required String entityId, required String saleId, required DateTime now}) => {'id': uuid.v4(), 'entity_id': entityId, 'sale_id': saleId, 'inventory_item_id': inventoryItemId, 'product_unit_id': productUnitId, 'quantity': quantity, 'unit_factor_at_sale': unitFactor, 'base_quantity': baseQuantity, 'unit_price_minor': unitPriceMinor, 'line_discount_minor': lineDiscountMinor, 'line_total_minor': lineTotalMinor, 'net_amount_minor': 0, 'cost_amount_minor': 0, 'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String()};
-}
-
-class PurchaseLineInput {
-  const PurchaseLineInput({required this.inventoryItemId, required this.productUnitId, required this.quantity, required this.unitFactor, required this.unitCostMinor, this.lineDiscountMinor = 0});
-  final String inventoryItemId;
-  final String productUnitId;
-  final double quantity;
-  final double unitFactor;
-  final int unitCostMinor;
-  final int lineDiscountMinor;
-  double get baseQuantity => quantity * unitFactor;
-  int get lineTotalMinor => Money.multiplyByQuantity(unitCostMinor, quantity) - lineDiscountMinor;
-  Map<String, Object?> toPurchaseRow({required String entityId, required String purchaseId, required DateTime now}) => {'id': uuid.v4(), 'entity_id': entityId, 'purchase_invoice_id': purchaseId, 'inventory_item_id': inventoryItemId, 'product_unit_id': productUnitId, 'quantity': quantity, 'unit_factor_at_purchase': unitFactor, 'base_quantity': baseQuantity, 'unit_cost_minor': unitCostMinor, 'line_discount_minor': lineDiscountMinor, 'line_total_minor': lineTotalMinor, 'cost_amount_minor': 0, 'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String()};
-}
-
-class WasteLineInput {
-  const WasteLineInput({required this.inventoryItemId, required this.productUnitId, required this.quantity, required this.unitFactor});
-  final String inventoryItemId;
-  final String productUnitId;
-  final double quantity;
-  final double unitFactor;
-  double get baseQuantity => quantity * unitFactor;
-}
-
-class ReturnLineInput {
-  const ReturnLineInput({required this.originalItemId, required this.quantity, required this.unitFactor});
-  final String originalItemId;
-  final double quantity;
-  final double unitFactor;
-  double get baseQuantity => quantity * unitFactor;
 }

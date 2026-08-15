@@ -2,6 +2,8 @@ import 'package:accounting_system/core/configs/uuid.dart';
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
+import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:sqflite/sqflite.dart';
 
 class MasterDataRepository {
@@ -9,7 +11,7 @@ class MasterDataRepository {
   final AppDatabase _database;
   final _outbox = const OutboxService();
 
-  Future<List<Map<String, Object?>>> listParties({String? type, String search = ''}) async {
+  Future<List<Party>> listParties({String? type, String search = ''}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final where = <String>['entity_id = ?', 'deleted_at IS NULL'];
@@ -24,7 +26,8 @@ class MasterDataRepository {
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
-    return db.query('parties', where: where.join(' AND '), whereArgs: args, orderBy: 'name COLLATE NOCASE');
+    final rows = await db.query('parties', where: where.join(' AND '), whereArgs: args, orderBy: 'name COLLATE NOCASE');
+    return rows.map(Party.fromSql).toList(growable: false);
   }
 
   Future<String> saveParty({String? id, required String name, String? phone, required String type}) async {
@@ -71,10 +74,11 @@ class MasterDataRepository {
     });
   }
 
-  Future<List<Map<String, Object?>>> listCategories() async {
+  Future<List<Category>> listCategories() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('categories', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query('categories', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    return rows.map(Category.fromSql).toList(growable: false);
   }
 
   Future<String> saveCategory({String? id, required String name}) async {
@@ -92,7 +96,7 @@ class MasterDataRepository {
     return categoryId;
   }
 
-  Future<List<Map<String, Object?>>> listProducts({String search = ''}) async {
+  Future<List<Product>> listProducts({String search = ''}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final args = <Object?>[ctx.entityId];
@@ -102,7 +106,7 @@ class MasterDataRepository {
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT p.*, c.name AS category_name,
        (SELECT u.id FROM product_units u WHERE u.product_id=p.id AND u.is_primary=1 AND u.deleted_at IS NULL LIMIT 1) AS primary_unit_id,
        (SELECT u.name FROM product_units u WHERE u.product_id=p.id AND u.is_primary=1 AND u.deleted_at IS NULL LIMIT 1) AS primary_unit_name
@@ -111,6 +115,7 @@ LEFT JOIN categories c ON c.id=p.category_id
 WHERE $where
 ORDER BY p.name COLLATE NOCASE
 ''', args);
+    return rows.map(Product.fromSql).toList(growable: false);
   }
 
   Future<String> createProduct({required String name, String? categoryId, double minQuantity = 0, String primaryUnitName = 'Unit', String? barcode}) async {
@@ -165,15 +170,16 @@ ORDER BY p.name COLLATE NOCASE
     return productId;
   }
 
-  Future<List<Map<String, Object?>>> listProductUnits(String productId) async {
+  Future<List<ProductUnit>> listProductUnits(String productId) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query(
+    final rows = await db.query(
       'product_units',
       where: 'entity_id=? AND product_id=? AND deleted_at IS NULL',
       whereArgs: [ctx.entityId, productId],
       orderBy: 'is_primary DESC, name COLLATE NOCASE',
     );
+    return rows.map(ProductUnit.fromSql).toList(growable: false);
   }
 
   Future<String> saveProductUnit({
@@ -230,16 +236,17 @@ ORDER BY p.name COLLATE NOCASE
     return unitId;
   }
 
-  Future<List<Map<String, Object?>>> listBarcodes(String productId) async {
+  Future<List<Barcode>> listBarcodes(String productId) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT b.*, u.name AS unit_name
 FROM barcodes b
 JOIN product_units u ON u.id=b.product_unit_id
 WHERE b.entity_id=? AND u.product_id=? AND b.deleted_at IS NULL AND u.deleted_at IS NULL
 ORDER BY b.code
 ''', [ctx.entityId, productId]);
+    return rows.map(Barcode.fromSql).toList(growable: false);
   }
 
   Future<String> addBarcode({required String productUnitId, required String code}) async {
@@ -261,10 +268,11 @@ ORDER BY b.code
     return id;
   }
 
-  Future<List<Map<String, Object?>>> listProductSpecifications(String productId) async {
+  Future<List<ProductSpecification>> listProductSpecifications(String productId) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('product_specifications', where: 'entity_id=? AND product_id=? AND deleted_at IS NULL', whereArgs: [ctx.entityId, productId], orderBy: 'title');
+    final rows = await db.query('product_specifications', where: 'entity_id=? AND product_id=? AND deleted_at IS NULL', whereArgs: [ctx.entityId, productId], orderBy: 'title');
+    return rows.map(ProductSpecification.fromSql).toList(growable: false);
   }
 
   Future<String> addProductSpecification({required String productId, required String title, required String value}) async {
@@ -287,10 +295,11 @@ ORDER BY b.code
     return id;
   }
 
-  Future<List<Map<String, Object?>>> listWarehouses() async {
+  Future<List<Warehouse>> listWarehouses() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('warehouses', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query('warehouses', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    return rows.map(Warehouse.fromSql).toList(growable: false);
   }
 
   Future<String> saveWarehouse({String? id, required String name}) async {
@@ -308,10 +317,11 @@ ORDER BY b.code
     return warehouseId;
   }
 
-  Future<List<Map<String, Object?>>> listFinancialYears() async {
+  Future<List<FinancialYear>> listFinancialYears() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('financial_years', where: 'entity_id = ?', whereArgs: [ctx.entityId], orderBy: 'starts_on DESC');
+    final rows = await db.query('financial_years', where: 'entity_id = ?', whereArgs: [ctx.entityId], orderBy: 'starts_on DESC');
+    return rows.map(FinancialYear.fromSql).toList(growable: false);
   }
 
   Future<String> createFinancialYear({required String name, required DateTime startsOn, required DateTime endsOn}) async {
@@ -375,10 +385,11 @@ ORDER BY b.code
     });
   }
 
-  Future<List<Map<String, Object?>>> listCashboxes() async {
+  Future<List<Cashbox>> listCashboxes() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('cashboxes', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query('cashboxes', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    return rows.map(Cashbox.fromSql).toList(growable: false);
   }
 
   Future<String> saveCashbox({String? id, required String name}) async {

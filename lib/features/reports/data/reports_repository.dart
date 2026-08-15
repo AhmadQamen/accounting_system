@@ -1,11 +1,12 @@
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/db/local_context.dart';
+import 'package:accounting_system/features/reports/models/report_models.dart';
 
 class ReportsRepository {
   ReportsRepository(this._database);
   final AppDatabase _database;
 
-  Future<Map<String, int>> dashboard() async {
+  Future<DashboardMetrics> dashboard() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final today = DateTime.now().toUtc();
@@ -23,19 +24,19 @@ class ReportsRepository {
     final inventoryValue = await scalar('SELECT COALESCE(SUM(inventory_value_minor),0) FROM inventory_items WHERE entity_id=?', [ctx.entityId]);
     final lowStock = await scalar('''SELECT COUNT(*) FROM inventory_items i JOIN products p ON p.id=i.product_id WHERE i.entity_id=? AND p.min_quantity>0 AND i.current_quantity<=p.min_quantity''', [ctx.entityId]);
     final pendingSync = await scalar("SELECT COUNT(*) FROM sync_outbox WHERE entity_id=? AND status IN ('pending','failed')", [ctx.entityId]);
-    return {
-      'cash': cash,
-      'salesToday': sales,
-      'purchasesToday': purchases,
-      'customerReceivables': customerReceivables,
-      'supplierPayables': supplierPayables,
-      'inventoryValue': inventoryValue,
-      'lowStock': lowStock,
-      'pendingSync': pendingSync,
-    };
+    return DashboardMetrics(
+      cash: cash,
+      salesToday: sales,
+      purchasesToday: purchases,
+      customerReceivables: customerReceivables,
+      supplierPayables: supplierPayables,
+      inventoryValue: inventoryValue,
+      lowStock: lowStock,
+      pendingSync: pendingSync,
+    );
   }
 
-  Future<Map<String, Object?>> salesReport(DateTime from, DateTime to) async {
+  Future<SalesReport> salesReport(DateTime from, DateTime to) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final fromText = from.toUtc().toIso8601String();
@@ -50,14 +51,10 @@ SELECT COALESCE(SUM(s.final_minor),0) gross_sales,
 FROM sales s
 WHERE s.entity_id=? AND s.status='posted' AND s.occurred_at>=? AND s.occurred_at<?
 ''', [ctx.entityId, fromText, toText, ctx.entityId, fromText, toText, ctx.entityId, fromText, toText, ctx.entityId, fromText, toText]);
-    final result = rows.first;
-    final gross = (result['gross_sales'] as num).toInt();
-    final returns = (result['returns'] as num).toInt();
-    final cogs = (result['cogs'] as num).toInt();
-    return {...result, 'net_sales': gross - returns, 'gross_profit': gross - returns - cogs};
+    return SalesReport.fromSql(rows.first);
   }
 
-  Future<Map<String, Object?>> purchasesReport(DateTime from, DateTime to) async {
+  Future<PurchasesReport> purchasesReport(DateTime from, DateTime to) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final fromText = from.toUtc().toIso8601String();
@@ -70,13 +67,10 @@ SELECT COALESCE(SUM(p.final_minor),0) gross_purchases,
 FROM purchase_invoices p
 WHERE p.entity_id=? AND p.status='posted' AND p.occurred_at>=? AND p.occurred_at<?
 ''', [ctx.entityId, fromText, toText, ctx.entityId, fromText, toText]);
-    final result = rows.first;
-    final gross = (result['gross_purchases'] as num).toInt();
-    final returns = (result['returns'] as num).toInt();
-    return {...result, 'net_purchases': gross - returns};
+    return PurchasesReport.fromSql(rows.first);
   }
 
-  Future<List<Map<String, Object?>>> inventoryBalances({String search = ''}) async {
+  Future<List<InventoryBalanceReport>> inventoryBalances({String search = ''}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final args = <Object?>[ctx.entityId];
@@ -85,7 +79,7 @@ WHERE p.entity_id=? AND p.status='posted' AND p.occurred_at>=? AND p.occurred_at
       extra = 'AND p.name LIKE ?';
       args.add('%${search.trim()}%');
     }
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT p.name product_name, w.name warehouse_name,
        i.current_quantity, i.inventory_value_minor, p.min_quantity
 FROM inventory_items i
@@ -94,33 +88,36 @@ JOIN warehouses w ON w.id=i.warehouse_id
 WHERE i.entity_id=? AND p.deleted_at IS NULL AND w.deleted_at IS NULL $extra
 ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
 ''', args);
+    return rows.map(InventoryBalanceReport.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> partyBalances() async {
+  Future<List<PartyBalanceReport>> partyBalances() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query(
+    final rows = await db.query(
       'parties',
       columns: ['id', 'name', 'phone', 'type', 'current_balance_minor'],
       where: 'entity_id=? AND deleted_at IS NULL',
       whereArgs: [ctx.entityId],
       orderBy: 'name COLLATE NOCASE',
     );
+    return rows.map(PartyBalanceReport.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> cashBalances() async {
+  Future<List<CashBalanceReport>> cashBalances() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query(
+    final rows = await db.query(
       'cashboxes',
       columns: ['id', 'name', 'current_balance_minor'],
       where: 'entity_id=? AND deleted_at IS NULL',
       whereArgs: [ctx.entityId],
       orderBy: 'name COLLATE NOCASE',
     );
+    return rows.map(CashBalanceReport.fromSql).toList(growable: false);
   }
 
-  Future<Map<String, Object?>> cashFlowReport(DateTime from, DateTime to) async {
+  Future<CashFlowReport> cashFlowReport(DateTime from, DateTime to) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final rows = await db.rawQuery('''
@@ -131,18 +128,18 @@ SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount_minor ELSE 0 END),0) to
 FROM transactions
 WHERE entity_id=? AND occurred_at>=? AND occurred_at<?
 ''', [ctx.entityId, from.toUtc().toIso8601String(), to.toUtc().toIso8601String()]);
-    return rows.first;
+    return CashFlowReport.fromSql(rows.first);
   }
 
 
-  Future<Map<String, List<int>>> dashboardTrends({int days = 7}) async {
+  Future<DashboardTrends> dashboardTrends({int days = 7}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final today = DateTime.now().toUtc();
     final start = DateTime.utc(today.year, today.month, today.day).subtract(Duration(days: days - 1));
     final fromText = start.toIso8601String();
 
-    Future<Map<String, int>> grouped(String table) async {
+    Future<List<DailyTotal>> grouped(String table) async {
       final rows = await db.rawQuery('''
 SELECT substr(occurred_at, 1, 10) day, COALESCE(SUM(final_minor),0) total
 FROM $table
@@ -150,10 +147,7 @@ WHERE entity_id=? AND status='posted' AND occurred_at>=?
 GROUP BY substr(occurred_at, 1, 10)
 ORDER BY day
 ''', [ctx.entityId, fromText]);
-      return {
-        for (final row in rows)
-          '${row['day']}': ((row['total'] as num?) ?? 0).toInt(),
-      };
+      return rows.map(DailyTotal.fromSql).toList(growable: false);
     }
 
     final sales = await grouped('sales');
@@ -162,16 +156,16 @@ ORDER BY day
     final purchaseValues = <int>[];
     for (var i = 0; i < days; i++) {
       final day = start.add(Duration(days: i)).toIso8601String().substring(0, 10);
-      salesValues.add(sales[day] ?? 0);
-      purchaseValues.add(purchases[day] ?? 0);
+      salesValues.add(_totalForDay(sales, day));
+      purchaseValues.add(_totalForDay(purchases, day));
     }
-    return {'sales': salesValues, 'purchases': purchaseValues};
+    return DashboardTrends(sales: salesValues, purchases: purchaseValues);
   }
 
-  Future<List<Map<String, Object?>>> recentActivity({int limit = 7}) async {
+  Future<List<ActivityItem>> recentActivity({int limit = 7}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT * FROM (
   SELECT 'sale' kind, s.id id, s.invoice_number display_number,
          s.final_minor amount_minor, s.occurred_at occurred_at,
@@ -196,12 +190,13 @@ SELECT * FROM (
 ORDER BY occurred_at DESC
 LIMIT ?
 ''', [ctx.entityId, ctx.entityId, ctx.entityId, limit]);
+    return rows.map(ActivityItem.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> lowStockItems({int limit = 5}) async {
+  Future<List<LowStockItem>> lowStockItems({int limit = 5}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT p.id product_id, p.name product_name, w.name warehouse_name,
        i.current_quantity, p.min_quantity
 FROM inventory_items i
@@ -213,5 +208,35 @@ ORDER BY (i.current_quantity / CASE WHEN p.min_quantity=0 THEN 1 ELSE p.min_quan
          p.name COLLATE NOCASE
 LIMIT ?
 ''', [ctx.entityId, limit]);
+    return rows.map(LowStockItem.fromSql).toList(growable: false);
   }
+  Future<DashboardData> dashboardData({int trendDays = 7, int activityLimit = 7, int lowStockLimit = 5}) async {
+    final metricsFuture = dashboard();
+    final trendsFuture = dashboardTrends(days: trendDays);
+    final activityFuture = recentActivity(limit: activityLimit);
+    final lowStockFuture = lowStockItems(limit: lowStockLimit);
+    return DashboardData(
+      metrics: await metricsFuture,
+      trends: await trendsFuture,
+      recentActivity: await activityFuture,
+      lowStockItems: await lowStockFuture,
+    );
+  }
+
+  Future<CashReportData> cashReportData(DateTime from, DateTime to) async {
+    final balancesFuture = cashBalances();
+    final flowFuture = cashFlowReport(from, to);
+    return CashReportData(
+      balances: await balancesFuture,
+      flow: await flowFuture,
+    );
+  }
+
+  int _totalForDay(List<DailyTotal> rows, String day) {
+    for (final row in rows) {
+      if (row.day == day) return row.totalMinor;
+    }
+    return 0;
+  }
+
 }

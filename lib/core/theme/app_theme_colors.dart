@@ -44,6 +44,8 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
 
 
   Color get primary => purple;
+  /// Foreground color used on the primary brand surface.
+  Color get onPrimary => Colors.white;
   Color get secondary => amber;
   Color get primaryTint => purpleTint;
   Color get primaryDim => purpleDim;

@@ -253,9 +253,10 @@ class _ErrorIconState extends State<_ErrorIcon>
       animation: _ctrl,
       builder: (_, _) {
         final isPulsing = _ctrl.value > 0.5;
-        final pulseValue = isPulsing
-            ? 1 + (_pulse.value - 1) * ((_ctrl.value - 0.5) / 0.5)
-            : 1;
+        final pulseValue =
+            isPulsing
+                ? 1 + (_pulse.value - 1) * ((_ctrl.value - 0.5) / 0.5)
+                : 1;
 
         return Opacity(
           opacity: _opacity.value,
@@ -314,58 +315,53 @@ class _RestartButton extends StatefulWidget {
 
 class _RestartButtonState extends State<_RestartButton> {
   bool _pressed = false;
-  bool _hovering = false;
+
+  void _setPressed(bool value) {
+    if (!mounted || _pressed == value) return;
+    setState(() => _pressed = value);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _pressed ? 0.97 : (_hovering ? 1.01 : 1.0),
-          duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [widget.colors.purple, widget.colors.purpleLight],
-              ),
-              borderRadius: BorderRadius.circular(13),
-              boxShadow: [
-                BoxShadow(
-                  color: widget.colors.purple.withAlpha(_hovering ? 60 : 40),
-                  blurRadius: _hovering ? 16 : 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _setPressed(true),
+      onTapUp: (_) => _setPressed(false),
+      onTapCancel: () => _setPressed(false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [widget.colors.purple, widget.colors.purpleLight],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.refresh_rounded,
-                  size: 18,
+            borderRadius: BorderRadius.circular(13),
+            boxShadow: [
+              BoxShadow(
+                color: widget.colors.purple.withAlpha(40),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
+              SizedBox(width: 8),
+              Text(
+                "إعادة تشغيل التطبيق",
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
-                const SizedBox(width: 8),
-                const Text(
-                  "إعادة تشغيل التطبيق",
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -375,7 +371,7 @@ class _RestartButtonState extends State<_RestartButton> {
 
 // ── COPY BUTTON ───────────────────────────────────────────────────────────────
 
-class _CopyButton extends StatefulWidget {
+class _CopyButton extends StatelessWidget {
   final Object error;
   final StackTrace stack;
   final AppThemeColors colors;
@@ -387,60 +383,40 @@ class _CopyButton extends StatefulWidget {
   });
 
   @override
-  State<_CopyButton> createState() => _CopyButtonState();
-}
-
-class _CopyButtonState extends State<_CopyButton> {
-  bool _hovering = false;
-
-  @override
   Widget build(BuildContext context) {
-    final colors = widget.colors;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: Material(
-        color: _hovering ? colors.purpleTint : colors.bgElevated,
-        borderRadius: BorderRadius.circular(13),
-        child: InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        Clipboard.setData(
+          ClipboardData(text: "Error: $error\n\nStackTrace:\n$stack"),
+        );
+        CustomSnackBar.showSuccessSnackbar("تم نسخ تفاصيل الخطأ");
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color: colors.bgElevated,
           borderRadius: BorderRadius.circular(13),
-          onTap: () {
-            Clipboard.setData(
-              ClipboardData(
-                text: "Error: ${widget.error}\n\nStackTrace:\n${widget.stack}",
-              ),
-            );
-
-            CustomSnackBar.showSuccessSnackbar("تم نسخ تفاصيل الخطأ");
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: colors.borderPurple.withAlpha(_hovering ? 60 : 30),
-                width: 0.5,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.copy_rounded, size: 16, color: colors.textSecondary),
-                const SizedBox(width: 8),
-                Text(
-                  "نسخ تفاصيل الخطأ",
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: colors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
+          border: Border.all(
+            color: colors.borderPurple.withAlpha(30),
+            width: 0.5,
           ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.copy_rounded, size: 16, color: colors.textSecondary),
+            const SizedBox(width: 8),
+            Text(
+              "نسخ تفاصيل الخطأ",
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: colors.textSecondary,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,6 +1,6 @@
+/// Sentinel used by `copyWith` to distinguish "not supplied" from `null`.
 class Unset {
-  const Unset();
+  const Unset._();
 }
 
-/// Sentinel value representing an unset value in copyWith
-const unset = Unset();
+const unset = Unset._();

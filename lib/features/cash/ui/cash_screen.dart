@@ -1,7 +1,10 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/blur_appbar.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
@@ -22,8 +25,8 @@ class CashScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataRevisionProvider);
-    final currency = ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
-    final compact = MediaQuery.sizeOf(context).width < 900;
+    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final compact = showCompactPageAppBar(context);
     final (icon, accent, subtitle) = switch (mode) {
       CashScreenMode.cashboxes => (Iconsax.wallet_money, context.colors.primary, 'أرصدة الصناديق وسجل الحركة والتسويات.'),
       CashScreenMode.expenses => (Iconsax.money_send, context.colors.error, 'مصروفات معتمدة مرتبطة بالصندوق مباشرة.'),
@@ -31,9 +34,8 @@ class CashScreen extends ConsumerWidget {
       CashScreenMode.sessions => (Iconsax.clock, context.colors.secondary, 'فتح وإغلاق جلسات الصندوق ومطابقة النقد.'),
     };
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: compact ? AppBar(title: Text(title)) : null,
+    return MyScaffold(
+      appBar: compact ? BlurAppBar(title: Text(title)) : null,
       body: PremiumPage(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -59,7 +61,7 @@ class CashScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 20),
-            FutureBuilder<List<Map<String, Object?>>>(
+            FutureBuilder<List<CashListItem>>(
               future: _load(ref),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
@@ -68,12 +70,12 @@ class CashScreen extends ConsumerWidget {
                 if (snapshot.hasError) {
                   return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل البيانات', subtitle: '${snapshot.error}');
                 }
-                final rows = snapshot.data ?? const <Map<String, Object?>>[];
+                final rows = snapshot.data ?? const <CashListItem>[];
                 final total = switch (mode) {
-                  CashScreenMode.cashboxes => rows.fold<int>(0, (sum, row) => sum + (((row['current_balance_minor'] as num?) ?? 0).toInt())),
-                  CashScreenMode.expenses => rows.fold<int>(0, (sum, row) => sum + (((row['amount_minor'] as num?) ?? 0).toInt())),
-                  CashScreenMode.transfers => rows.fold<int>(0, (sum, row) => sum + (((row['amount_minor'] as num?) ?? 0).toInt())),
-                  CashScreenMode.sessions => rows.where((row) => row['status'] == 'open').length,
+                  CashScreenMode.cashboxes => rows.whereType<Cashbox>().fold<int>(0, (sum, row) => sum + row.currentBalanceMinor),
+                  CashScreenMode.expenses => rows.whereType<Expense>().fold<int>(0, (sum, row) => sum + row.amountMinor),
+                  CashScreenMode.transfers => rows.whereType<CashTransfer>().fold<int>(0, (sum, row) => sum + row.amountMinor),
+                  CashScreenMode.sessions => rows.whereType<CashSession>().where((row) => row.status == 'open').length,
                 };
                 final totalLabel = mode == CashScreenMode.sessions
                     ? '$total'
@@ -92,8 +94,7 @@ class CashScreen extends ConsumerWidget {
                           children: [
                             SizedBox(
                               width: width,
-                              height: 132,
-                              child: AnimatedEntrance(
+                                child: AnimatedEntrance(
                                 delay: const Duration(milliseconds: 60),
                                 child: MetricCard(
                                   label: switch (mode) {
@@ -116,8 +117,7 @@ class CashScreen extends ConsumerWidget {
                             ),
                             SizedBox(
                               width: width,
-                              height: 132,
-                              child: AnimatedEntrance(
+                                child: AnimatedEntrance(
                                 delay: const Duration(milliseconds: 95),
                                 child: MetricCard(
                                   label: 'عدد السجلات',
@@ -173,17 +173,20 @@ class CashScreen extends ConsumerWidget {
     );
   }
 
-  Future<List<Map<String, Object?>>> _load(WidgetRef ref) => switch (mode) {
-        CashScreenMode.cashboxes => ref.read(cashRepositoryProvider).listCashboxes(),
-        CashScreenMode.expenses => ref.read(cashRepositoryProvider).listExpenses(),
-        CashScreenMode.transfers => ref.read(cashRepositoryProvider).listTransfers(),
-        CashScreenMode.sessions => ref.read(cashRepositoryProvider).listSessions(),
-      };
+  Future<List<CashListItem>> _load(WidgetRef ref) async {
+    final repo = ref.read(cashRepositoryProvider);
+    return switch (mode) {
+      CashScreenMode.cashboxes => List<CashListItem>.from(await repo.listCashboxes()),
+      CashScreenMode.expenses => List<CashListItem>.from(await repo.listExpenses()),
+      CashScreenMode.transfers => List<CashListItem>.from(await repo.listTransfers()),
+      CashScreenMode.sessions => List<CashListItem>.from(await repo.listSessions()),
+    };
+  }
 
   Widget _cashRow(
     BuildContext context,
     WidgetRef ref,
-    Map<String, Object?> row,
+    CashListItem row,
     String currency, {
     required bool showDivider,
   }) {
@@ -195,66 +198,161 @@ class CashScreen extends ConsumerWidget {
     late final Widget trailing;
     VoidCallback? onTap;
 
-    if (mode == CashScreenMode.cashboxes) {
-      icon = Iconsax.wallet_3;
-      accent = colors.primary;
-      titleText = '${row['name']}';
-      subtitleText = 'الرصيد الحالي من دفتر الحركات';
-      trailing = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            Money((row['current_balance_minor'] as num).toInt()).format(
-              locale: Localizations.localeOf(context).toString(),
-              currencyCode: currency,
+    switch (mode) {
+      case CashScreenMode.cashboxes:
+        final cashbox = row as Cashbox;
+        icon = Iconsax.wallet_3;
+        accent = colors.primary;
+        titleText = cashbox.name;
+        subtitleText = 'الرصيد الحالي من دفتر الحركات';
+        trailing = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                Money(cashbox.currentBalanceMinor).format(
+                  locale: Localizations.localeOf(context).toString(),
+                  currencyCode: currency,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
             ),
-            style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 12),
+            PopupMenuButton<String>(
+              onSelected: (value) async {
+                final id = cashbox.id;
+                if (id == null) return;
+                if (value == 'opening') {
+                  await _openingBalance(context, ref, id);
+                } else if (value == 'adjust') {
+                  await _adjustment(context, ref, id);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'opening',
+                  child: ListTile(
+                    leading: Icon(Icons.add_box_outlined),
+                    title: Text('رصيد افتتاحي'),
+                    dense: true,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'adjust',
+                  child: ListTile(
+                    leading: Icon(Icons.tune_rounded),
+                    title: Text('تسوية الصندوق'),
+                    dense: true,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+        if (cashbox.id != null) {
+          onTap = () => _history(context, ref, cashbox.id!, currency);
+        }
+        break;
+      case CashScreenMode.expenses:
+        final expense = row as Expense;
+        icon = Iconsax.money_send;
+        accent = colors.error;
+        titleText = expense.expenseNumber;
+        subtitleText = '${expense.cashboxName ?? 'صندوق'} • ${_prettyDate(expense.occurredAt)}';
+        trailing = Text(
+          Money(expense.amountMinor).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
           ),
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'opening') await _openingBalance(context, ref, row['id'] as String);
-              if (value == 'adjust') await _adjustment(context, ref, row['id'] as String);
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'opening', child: ListTile(leading: Icon(Icons.add_box_outlined), title: Text('رصيد افتتاحي'), dense: true)),
-              PopupMenuItem(value: 'adjust', child: ListTile(leading: Icon(Icons.tune_rounded), title: Text('تسوية الصندوق'), dense: true)),
-            ],
+          style: TextStyle(
+            color: colors.error,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
           ),
-        ],
-      );
-      onTap = () => _history(context, ref, row['id'] as String, currency);
-    } else if (mode == CashScreenMode.expenses) {
-      icon = Iconsax.money_send;
-      accent = colors.error;
-      titleText = '${row['expense_number']}';
-      subtitleText = '${row['cashbox_name']} • ${_prettyDate('${row['occurred_at']}')}';
-      trailing = Text(
-        Money((row['amount_minor'] as num).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
-        style: TextStyle(color: colors.error, fontWeight: FontWeight.w900, fontSize: 12),
-      );
-    } else if (mode == CashScreenMode.transfers) {
-      icon = Iconsax.convert_card;
-      accent = colors.info;
-      titleText = '${row['transfer_number']}';
-      subtitleText = '${row['from_cashbox_name']} ← ${row['to_cashbox_name']} • ${_prettyDate('${row['occurred_at']}')}';
-      trailing = Text(
-        Money((row['amount_minor'] as num).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
-        style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 12),
-      );
-    } else {
-      final open = row['status'] == 'open';
-      icon = open ? Icons.lock_open_rounded : Icons.lock_outline_rounded;
-      accent = open ? colors.success : colors.textSecondary;
-      titleText = '${row['cashbox_name']}';
-      subtitleText = '${open ? 'جلسة مفتوحة' : 'جلسة مغلقة'} • ${_prettyDate('${row['opened_at']}')}';
-      trailing = open
-          ? StatusPill(label: 'مفتوحة', color: colors.success, icon: Icons.lock_open_rounded, compact: true)
-          : Text(
-              'فرق ${Money(((row['difference_minor'] as num?) ?? 0).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
-              style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.w800, fontSize: 11),
-            );
-      onTap = open ? () => _closeSession(context, ref, row['id'] as String, currency) : null;
+        );
+        break;
+      case CashScreenMode.transfers:
+        final transfer = row as CashTransfer;
+        icon = Iconsax.convert_card;
+        accent = colors.info;
+        titleText = transfer.transferNumber;
+        subtitleText = '${transfer.fromCashboxName ?? 'صندوق'} ← ${transfer.toCashboxName ?? 'صندوق'} • ${_prettyDate(transfer.occurredAt)}';
+        trailing = Text(
+          Money(transfer.amountMinor).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
+          ),
+          style: TextStyle(
+            color: colors.textPrimary,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+          ),
+        );
+        break;
+      case CashScreenMode.sessions:
+        final session = row as CashSession;
+        final open = session.status == 'open';
+        icon = open ? Icons.lock_open_rounded : Icons.lock_outline_rounded;
+        accent = open ? colors.success : colors.textSecondary;
+        titleText = session.cashboxName ?? 'صندوق';
+        subtitleText = '${open ? 'جلسة مفتوحة' : 'جلسة مغلقة'} • ${_prettyDate(session.openedAt)}';
+        trailing = open
+            ? StatusPill(
+                label: 'مفتوحة',
+                color: colors.success,
+                icon: Icons.lock_open_rounded,
+                compact: true,
+              )
+            : Text(
+                'فرق ${Money(session.differenceMinor ?? 0).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              );
+        if (open && session.id != null) {
+          onTap = () => _closeSession(context, ref, session.id!, currency);
+        }
+        break;
     }
+
+    final leading = Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: accent, size: 20),
+    );
+    final identity = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titleText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: colors.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitleText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: colors.textDim, fontSize: 10.5),
+        ),
+      ],
+    );
 
     return Column(
       children: [
@@ -266,28 +364,40 @@ class CashScreen extends ConsumerWidget {
             borderRadius: BorderRadius.circular(14),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
-              child: Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(color: accent.withValues(alpha: .10), borderRadius: BorderRadius.circular(14)),
-                    child: Icon(icon, color: accent, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < 560) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(titleText, style: TextStyle(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w900)),
-                        const SizedBox(height: 3),
-                        Text(subtitleText, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+                        Row(
+                          children: [
+                            leading,
+                            const SizedBox(width: 12),
+                            Expanded(child: identity),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsetsDirectional.only(start: 54),
+                          child: Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: trailing,
+                          ),
+                        ),
                       ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  trailing,
-                ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      leading,
+                      const SizedBox(width: 12),
+                      Expanded(child: identity),
+                      const SizedBox(width: 10),
+                      Flexible(child: trailing),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -297,9 +407,9 @@ class CashScreen extends ConsumerWidget {
     );
   }
 
-  String _prettyDate(String raw) {
-    final d = DateTime.tryParse(raw)?.toLocal();
-    if (d == null) return raw;
+  String _prettyDate(DateTime? value) {
+    final d = value?.toLocal();
+    if (d == null) return '-';
     return '${d.day}/${d.month}/${d.year} • ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
@@ -325,7 +435,7 @@ class CashScreen extends ConsumerWidget {
       } else if (boxes.isEmpty) {
         throw StateError('أضف صندوقاً أولاً');
       } else if (mode == CashScreenMode.expenses) {
-        var box = boxes.first['id'] as String;
+        var box = boxes.first.id!;
         final amount = TextEditingController();
         final note = TextEditingController();
         final ok = await _moneyDialog(context, 'مصروف جديد', boxes, (value) => box = value, amount, note);
@@ -336,7 +446,7 @@ class CashScreen extends ConsumerWidget {
         if (boxes.length < 2) throw StateError('تحتاج صندوقين على الأقل');
         await _transfer(context, ref, boxes);
       } else {
-        var box = boxes.first['id'] as String;
+        var box = boxes.first.id!;
         final amount = TextEditingController(text: '0');
         final ok = await _moneyDialog(context, 'فتح جلسة صندوق', boxes, (value) => box = value, amount, null);
         if (ok) await ref.read(cashRepositoryProvider).openSession(cashboxId: box, openingAmountMinor: Money.fromMajor(amount.text));
@@ -356,7 +466,7 @@ class CashScreen extends ConsumerWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('الرصيد الافتتاحي'),
         content: SizedBox(
-          width: 420,
+          width: responsiveDialogWidth(context, 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -394,7 +504,7 @@ class CashScreen extends ConsumerWidget {
         builder: (dialogContext, setLocal) => AlertDialog(
           title: const Text('تسوية الصندوق'),
           content: SizedBox(
-            width: 420,
+            width: responsiveDialogWidth(context, 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -440,35 +550,62 @@ class CashScreen extends ConsumerWidget {
       builder: (dialogContext) => Dialog(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760, maxHeight: 650),
-          child: Column(
+          child: MyScaffold(
+            appBar: BlurAppBar(
+              title: const Text('حركات الصندوق'),
+              automaticallyImplyLeading: false,
+              actions: [IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close))],
+            ),
+            body: Column(
             children: [
-              AppBar(title: const Text('حركات الصندوق'), automaticallyImplyLeading: false, actions: [IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close))]),
               Expanded(
                 child: ListView.separated(
                   itemCount: rows.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final row = rows[index];
-                    final amount = (row['amount_minor'] as num).toInt();
-                    return ListTile(
-                      leading: Icon(row['direction'] == 'in' ? Icons.south_west : Icons.north_east),
-                      title: Text('${row['kind']}'),
-                      subtitle: Text('${row['occurred_at']} • ${row['party_name'] ?? ''}'),
-                      trailing: Text('${row['direction'] == 'in' ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}'),
+                    final amount = row.amountMinor;
+                    final amountText = '${row.direction == 'in' ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final identity = Row(
+                            children: [
+                              Icon(row.direction == 'in' ? Icons.south_west : Icons.north_east),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(row.kind, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 2),
+                                    Text('${_prettyDate(row.occurredAt)} • ${row.partyName ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.colors.textDim, fontSize: 11)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          );
+                          final amountWidget = Text(amountText, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800));
+                          if (constraints.maxWidth < 440) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [identity, const SizedBox(height: 7), Padding(padding: const EdgeInsetsDirectional.only(start: 34), child: amountWidget)]);
+                          return Row(children: [Expanded(child: identity), const SizedBox(width: 12), Flexible(child: amountWidget)]);
+                        },
+                      ),
                     );
                   },
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Future<void> _transfer(BuildContext context, WidgetRef ref, List<Map<String, Object?>> boxes) async {
-    var from = boxes.first['id'] as String;
-    var to = boxes[1]['id'] as String;
+  Future<void> _transfer(BuildContext context, WidgetRef ref, List<Cashbox> boxes) async {
+    var from = boxes.first.id!;
+    var to = boxes[1].id!;
     final amount = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -476,13 +613,13 @@ class CashScreen extends ConsumerWidget {
         builder: (dialogContext, setLocal) => AlertDialog(
           title: const Text('تحويل بين الصناديق'),
           content: SizedBox(
-            width: 440,
+            width: responsiveDialogWidth(context, 440),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: from,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
+                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
                   onChanged: (value) {
                     if (value != null) setLocal(() => from = value);
                   },
@@ -491,7 +628,7 @@ class CashScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   value: to,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
+                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
                   onChanged: (value) {
                     if (value != null) setLocal(() => to = value);
                   },
@@ -531,8 +668,8 @@ class CashScreen extends ConsumerWidget {
         final result = await ref.read(cashRepositoryProvider).closeSession(sessionId: sessionId, countedAmountMinor: Money.fromMajor(counted.text));
         ref.read(dataRevisionProvider.notifier).state++;
         if (context.mounted) {
-          final expected = Money(result['expected']!).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
-          final difference = Money(result['difference']!).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+          final expected = Money(result.expectedMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+          final difference = Money(result.differenceMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('المتوقع: $expected • الفرق: $difference')));
         }
       } catch (e) {
@@ -545,25 +682,25 @@ class CashScreen extends ConsumerWidget {
   Future<bool> _moneyDialog(
     BuildContext context,
     String title,
-    List<Map<String, Object?>> boxes,
+    List<Cashbox> boxes,
     ValueChanged<String> onBox,
     TextEditingController amount,
     TextEditingController? note,
   ) async {
-    var box = boxes.first['id'] as String;
+    var box = boxes.first.id!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocal) => AlertDialog(
           title: Text(title),
           content: SizedBox(
-            width: 420,
+            width: responsiveDialogWidth(context, 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: box,
-                  items: boxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
+                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
                   onChanged: (value) {
                     if (value != null) {
                       setLocal(() => box = value);

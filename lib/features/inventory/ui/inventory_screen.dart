@@ -2,9 +2,13 @@ import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/inventory/models/inventory_models.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key});
@@ -25,12 +29,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   @override
   Widget build(BuildContext context) {
     ref.watch(dataRevisionProvider);
-    final currency = ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
-    final compact = MediaQuery.sizeOf(context).width < 900;
+    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final compact = showCompactPageAppBar(context);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: compact ? AppBar(title: const Text('المخزون')) : null,
+    return MyScaffold(
+      appBar: compact ? const BlurAppBar(title: Text('المخزون')) : null,
       body: PremiumPage(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -51,7 +54,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            FutureBuilder<List<Map<String, Object?>>>(
+            FutureBuilder<List<InventoryItem>>(
               future: ref.read(inventoryRepositoryProvider).listInventory(search: search.text),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
@@ -60,14 +63,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 if (snapshot.hasError) {
                   return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل المخزون', subtitle: '${snapshot.error}');
                 }
-                final rows = snapshot.data ?? const <Map<String, Object?>>[];
-                final totalValue = rows.fold<int>(0, (sum, row) => sum + (((row['inventory_value_minor'] as num?) ?? 0).toInt()));
-                final low = rows.where((row) {
-                  final qty = ((row['current_quantity'] as num?) ?? 0).toDouble();
-                  final min = ((row['min_quantity'] as num?) ?? 0).toDouble();
-                  return min > 0 && qty <= min;
-                }).length;
-                final warehouses = rows.map((e) => '${e['warehouse_name']}').toSet().length;
+                final rows = snapshot.data ?? const <InventoryItem>[];
+                final totalValue = rows.fold<int>(0, (sum, row) => sum + row.inventoryValueMinor);
+                final low = rows.where((row) => row.isLowStock).length;
+                final warehouses = rows.map((e) => e.warehouseName ?? '').where((e) => e.isNotEmpty).toSet().length;
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -88,7 +87,6 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                             for (var i = 0; i < stats.length; i++)
                               SizedBox(
                                 width: width,
-                                height: 132,
                                 child: AnimatedEntrance(
                                   delay: Duration(milliseconds: 60 + i * 35),
                                   child: MetricCard(
@@ -111,27 +109,28 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: PremiumSearchField(
-                                    controller: search,
-                                    hintText: 'ابحث باسم المنتج…',
-                                    onChanged: (_) => setState(() {}),
-                                    trailing: search.text.isEmpty
-                                        ? null
-                                        : IconButton(
-                                            onPressed: () {
-                                              search.clear();
-                                              setState(() {});
-                                            },
-                                            icon: const Icon(Iconsax.close_circle, size: 18),
-                                          ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                StatusPill(label: '${rows.length} رصيد', color: context.colors.primary, icon: Iconsax.box),
-                              ],
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final field = PremiumSearchField(
+                                  controller: search,
+                                  hintText: 'ابحث باسم المنتج…',
+                                  onChanged: (_) => setState(() {}),
+                                  trailing: search.text.isEmpty
+                                      ? null
+                                      : IconButton(
+                                          onPressed: () {
+                                            search.clear();
+                                            setState(() {});
+                                          },
+                                          icon: const Icon(Iconsax.close_circle, size: 18),
+                                        ),
+                                );
+                                final count = StatusPill(label: '${rows.length} رصيد', color: context.colors.primary, icon: Iconsax.box);
+                                if (constraints.maxWidth < 500) {
+                                  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [field, const SizedBox(height: 10), Align(alignment: AlignmentDirectional.centerStart, child: count)]);
+                                }
+                                return Row(children: [Expanded(child: field), const SizedBox(width: 10), count]);
+                              },
                             ),
                             const SizedBox(height: 14),
                             if (rows.isEmpty)
@@ -180,8 +179,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       return;
     }
 
-    String productId = products.first['id'] as String;
-    String warehouseId = warehouses.first['id'] as String;
+    String productId = products.first.id!;
+    String warehouseId = warehouses.first.id!;
     final qty = TextEditingController();
     final value = TextEditingController();
     final ok = await showDialog<bool>(
@@ -196,13 +195,13 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             ],
           ),
           content: SizedBox(
-            width: 450,
+            width: responsiveDialogWidth(context, 450),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: productId,
-                  items: products.map((p) => DropdownMenuItem(value: p['id'] as String, child: Text('${p['name']}'))).toList(),
+                  items: products.map((p) => DropdownMenuItem(value: p.id!, child: Text(p.name))).toList(),
                   onChanged: (v) {
                     if (v != null) setLocal(() => productId = v);
                   },
@@ -211,7 +210,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   value: warehouseId,
-                  items: warehouses.map((p) => DropdownMenuItem(value: p['id'] as String, child: Text('${p['name']}'))).toList(),
+                  items: warehouses.map((p) => DropdownMenuItem(value: p.id!, child: Text(p.name))).toList(),
                   onChanged: (v) {
                     if (v != null) setLocal(() => warehouseId = v);
                   },
@@ -252,67 +251,75 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
 class _InventoryRow extends StatelessWidget {
   const _InventoryRow({required this.row, required this.currency, required this.showDivider});
-  final Map<String, Object?> row;
+  final InventoryItem row;
   final String currency;
   final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final qty = ((row['current_quantity'] as num?) ?? 0).toDouble();
-    final min = ((row['min_quantity'] as num?) ?? 0).toDouble();
+    final qty = row.currentQuantity;
+    final min = row.minQuantity;
     final low = min > 0 && qty <= min;
-    final value = ((row['inventory_value_minor'] as num?) ?? 0).toInt();
+    final value = row.inventoryValueMinor;
     final avg = qty > 0 ? (value / qty).round() : 0;
+    final valueText = Money(value).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+    final avgText = Money(avg).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+
+    final icon = Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(color: (low ? colors.error : colors.primary).withValues(alpha: .10), borderRadius: BorderRadius.circular(14)),
+      child: Icon(low ? Iconsax.warning_2 : Iconsax.box, color: low ? colors.error : colors.primary, size: 20),
+    );
+
+    final identity = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(row.productName ?? 'منتج', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13)),
+        const SizedBox(height: 3),
+        Text('${row.warehouseName ?? 'مستودع'} • ${row.primaryUnitName ?? 'وحدة'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+      ],
+    );
 
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: (low ? colors.error : colors.primary).withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(low ? Iconsax.warning_2 : Iconsax.box, color: low ? colors.error : colors.primary, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 650) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text('${row['product_name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13)),
-                    const SizedBox(height: 3),
-                    Text('${row['warehouse_name']} • ${row['primary_unit_name'] ?? 'وحدة'}', style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+                    Row(children: [icon, const SizedBox(width: 12), Expanded(child: identity)]),
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(start: 54),
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 6,
+                        children: [
+                          _InventoryValue(label: low ? 'عند الحد الأدنى' : 'الكمية الحالية', value: _qty(qty), color: low ? colors.error : colors.textPrimary),
+                          _InventoryValue(label: 'قيمة المخزون', value: valueText, color: colors.textPrimary),
+                          _InventoryValue(label: 'متوسط التكلفة', value: avgText, color: colors.textSecondary),
+                        ],
+                      ),
+                    ),
                   ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(_qty(qty), style: TextStyle(color: low ? colors.error : colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13)),
-                    Text(low ? 'عند الحد الأدنى' : 'الكمية الحالية', style: TextStyle(color: low ? colors.error : colors.textDim, fontSize: 9.5)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                flex: 2,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(Money(value).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 11.5)),
-                    Text('متوسط ${Money(avg).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 9.5)),
-                  ],
-                ),
-              ),
-            ],
+                );
+              }
+              return Row(
+                children: [
+                  icon,
+                  const SizedBox(width: 12),
+                  Expanded(flex: 3, child: identity),
+                  Expanded(child: _InventoryValue(label: low ? 'عند الحد الأدنى' : 'الكمية الحالية', value: _qty(qty), color: low ? colors.error : colors.textPrimary, alignEnd: true)),
+                  const SizedBox(width: 18),
+                  Expanded(flex: 2, child: _InventoryValue(label: 'متوسط $avgText', value: valueText, color: colors.textPrimary, alignEnd: true)),
+                ],
+              );
+            },
           ),
         ),
         if (showDivider) Divider(height: 1, color: colors.border),
@@ -321,4 +328,25 @@ class _InventoryRow extends StatelessWidget {
   }
 
   String _qty(double value) => value.truncateToDouble() == value ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
+}
+
+class _InventoryValue extends StatelessWidget {
+  const _InventoryValue({required this.label, required this.value, required this.color, this.alignEnd = false});
+  final String label;
+  final String value;
+  final Color color;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11.5)),
+        const SizedBox(height: 2),
+        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.colors.textDim, fontSize: 9.5)),
+      ],
+    );
+  }
 }

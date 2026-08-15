@@ -1,11 +1,15 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
+import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class PartyDetailsDialog extends ConsumerStatefulWidget {
   const PartyDetailsDialog({super.key, required this.party});
-  final Map<String, Object?> party;
+  final Party party;
 
   @override
   ConsumerState<PartyDetailsDialog> createState() => _PartyDetailsDialogState();
@@ -16,8 +20,8 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final currency = ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
-    final partyId = widget.party['id'] as String;
+    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final partyId = widget.party.id!;
     return Dialog(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 820, maxHeight: 720),
@@ -28,24 +32,24 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text('${widget.party['name']}', style: Theme.of(context).textTheme.headlineSmall)),
+                  Expanded(child: Text(widget.party.name, style: Theme.of(context).textTheme.headlineSmall)),
                   IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
                 ],
               ),
               const SizedBox(height: 8),
-              Text('${widget.party['phone'] ?? ''} • ${widget.party['type']}'),
+              Text('${widget.party.phone ?? ''} • ${widget.party.type}'),
               const SizedBox(height: 12),
-              FutureBuilder<Map<String, Object?>>(
-                key: ValueKey(revision),
-                future: _summary(partyId),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) return const LinearProgressIndicator();
-                  if (snapshot.hasError) return Text('${snapshot.error}');
-                  final data = snapshot.data!;
-                  final balance = (data['balance'] as num).toInt();
-                  final ledger = data['ledger'] as List<Map<String, Object?>>;
-                  return Expanded(
-                    child: Column(
+              Expanded(
+                child: FutureBuilder<PartyAccountSnapshot>(
+                  key: ValueKey(revision),
+                  future: _summary(partyId),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+                    if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
+                    final data = snapshot.data!;
+                    final balance = data.balanceMinor;
+                    final ledger = data.ledger;
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Card(
@@ -97,21 +101,33 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                   separatorBuilder: (_, __) => const Divider(height: 1),
                                   itemBuilder: (context, index) {
                                     final row = ledger[index];
-                                    final delta = (row['balance_delta_minor'] as num).toInt();
-                                    return ListTile(
-                                      title: Text('${row['entry_type']}'),
-                                      subtitle: Text('${row['occurred_at']} • ${row['reference_type']}'),
-                                      trailing: Text(
-                                        '${delta >= 0 ? '+' : ''}${Money(delta).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
+                                    final delta = row.balanceDeltaMinor;
+                                    final amountText = '${delta >= 0 ? '+' : ''}${Money(delta).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final info = Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(row.entryType, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                              const SizedBox(height: 2),
+                                              Text('${row.occurredAt?.toLocal().toString() ?? ''} • ${row.referenceType ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.colors.textDim, fontSize: 11)),
+                                            ],
+                                          );
+                                          final amount = Text(amountText, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: delta >= 0 ? context.colors.success : context.colors.error, fontWeight: FontWeight.w800));
+                                          if (constraints.maxWidth < 440) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [info, const SizedBox(height: 5), amount]);
+                                          return Row(children: [Expanded(child: info), const SizedBox(width: 10), Flexible(child: amount)]);
+                                        },
                                       ),
                                     );
                                   },
                                 ),
                         ),
                       ],
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -120,16 +136,8 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
     );
   }
 
-  Future<Map<String, Object?>> _summary(String partyId) async {
-    final db = await ref.read(appDatabaseProvider).database;
-    final ctx = await ref.read(localContextProvider.future);
-    final rows = await db.query('parties', columns: ['current_balance_minor'], where: 'id=? AND entity_id=?', whereArgs: [partyId, ctx.entityId], limit: 1);
-    final ledger = await ref.read(cashRepositoryProvider).partyLedger(partyId);
-    return {
-      'balance': rows.isEmpty ? 0 : rows.first['current_balance_minor'] as num,
-      'ledger': ledger,
-    };
-  }
+  Future<PartyAccountSnapshot> _summary(String partyId) =>
+      ref.read(cashRepositoryProvider).partyAccountSummary(partyId);
 
   Future<void> _payment({required bool receive}) async {
     final cashboxes = await ref.read(cashRepositoryProvider).listCashboxes();
@@ -138,7 +146,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أضف صندوقاً أولاً')));
       return;
     }
-    var cashboxId = cashboxes.first['id'] as String;
+    var cashboxId = cashboxes.first.id!;
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
@@ -147,13 +155,13 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
         builder: (dialogContext, setLocal) => AlertDialog(
           title: Text(receive ? 'قبض من الطرف' : 'دفع للطرف'),
           content: SizedBox(
-            width: 440,
+            width: responsiveDialogWidth(context, 440),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: cashboxId,
-                  items: cashboxes.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text('${e['name']}'))).toList(),
+                  items: cashboxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
                   onChanged: (value) {
                     if (value != null) setLocal(() => cashboxId = value);
                   },
@@ -176,7 +184,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
     if (ok == true) {
       try {
         await ref.read(cashRepositoryProvider).partyPayment(
-              partyId: widget.party['id'] as String,
+              partyId: widget.party.id!,
               cashboxId: cashboxId,
               amountMinor: Money.fromMajor(amount.text),
               receiveFromParty: receive,

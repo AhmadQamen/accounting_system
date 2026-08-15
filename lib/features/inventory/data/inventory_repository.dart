@@ -5,6 +5,7 @@ import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/services/inventory_ledger_service.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
+import 'package:accounting_system/features/inventory/models/inventory_models.dart';
 
 class InventoryRepository {
   InventoryRepository(this._database);
@@ -12,7 +13,7 @@ class InventoryRepository {
   final _ledger = const InventoryLedgerService();
   final _outbox = const OutboxService();
 
-  Future<List<Map<String, Object?>>> listInventory({String search = '', String? warehouseId}) async {
+  Future<List<InventoryItem>> listInventory({String search = '', String? warehouseId}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final args = <Object?>[ctx.entityId];
@@ -25,7 +26,7 @@ class InventoryRepository {
       filter += ' AND p.name LIKE ?';
       args.add('%${search.trim()}%');
     }
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT i.id AS inventory_item_id, i.product_id, i.warehouse_id,
        i.current_quantity, i.inventory_value_minor,
        p.name AS product_name, p.min_quantity,
@@ -38,9 +39,10 @@ LEFT JOIN product_units u ON u.product_id=p.id AND u.is_primary=1 AND u.deleted_
 WHERE $filter
 ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
 ''', args);
+    return rows.map(InventoryItem.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> listSellableProducts({String search = '', String? warehouseId}) async {
+  Future<List<SellableProduct>> listSellableProducts({String search = '', String? warehouseId}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final warehouse = warehouseId ?? ctx.defaultWarehouseId;
@@ -53,7 +55,7 @@ ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT p.id AS product_id, p.name AS product_name,
        u.id AS product_unit_id, u.name AS unit_name, u.factor,
        i.id AS inventory_item_id, COALESCE(i.current_quantity,0) AS current_quantity,
@@ -64,6 +66,7 @@ LEFT JOIN inventory_items i ON i.product_id=p.id AND i.warehouse_id=?
 WHERE p.entity_id=? AND p.deleted_at IS NULL $searchFilter
 ORDER BY p.name COLLATE NOCASE
 ''', [warehouse, ctx.entityId, ...args.skip(2)]);
+    return rows.map(SellableProduct.fromSql).toList(growable: false);
   }
 
 
@@ -247,10 +250,10 @@ ORDER BY p.name COLLATE NOCASE
     return id;
   }
 
-  Future<List<Map<String, Object?>>> movementHistory({String? inventoryItemId}) async {
+  Future<List<InventoryMovement>> movementHistory({String? inventoryItemId}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT m.*, p.name AS product_name, w.name AS warehouse_name
 FROM inventory_movements m
 JOIN inventory_items i ON i.id=m.inventory_item_id
@@ -260,9 +263,10 @@ WHERE m.entity_id=? ${inventoryItemId == null ? '' : 'AND m.inventory_item_id=?'
 ORDER BY m.occurred_at DESC
 LIMIT 500
 ''', inventoryItemId == null ? [ctx.entityId] : [ctx.entityId, inventoryItemId]);
+    return rows.map(InventoryMovement.fromSql).toList(growable: false);
   }
 
-  Future<Map<String, Object?>> verifyCache() async {
+  Future<InventoryCacheVerification> verifyCache() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final mismatches = await db.rawQuery('''
@@ -277,25 +281,6 @@ GROUP BY i.id
 HAVING ABS(i.current_quantity - COALESCE(SUM(m.quantity_delta),0)) > 0.000001
     OR i.inventory_value_minor <> COALESCE(SUM(m.value_delta_minor),0)
 ''', [ctx.entityId]);
-    return {'ok': mismatches.isEmpty, 'mismatches': jsonEncode(mismatches)};
+    return InventoryCacheVerification(ok: mismatches.isEmpty, mismatchCount: mismatches.length, details: jsonEncode(mismatches));
   }
-}
-
-class InventoryAdjustmentInput {
-  const InventoryAdjustmentInput({required this.inventoryItemId, required this.productUnitId, required this.countedQuantity, this.unitFactor = 1});
-  final String inventoryItemId;
-  final String productUnitId;
-  final double countedQuantity;
-  final double unitFactor;
-  Map<String, Object?> toJson() => {'inventory_item_id': inventoryItemId, 'product_unit_id': productUnitId, 'counted_quantity': countedQuantity, 'unit_factor': unitFactor};
-}
-
-class InventoryTransferInput {
-  const InventoryTransferInput({required this.productId, required this.productUnitId, required this.quantity, required this.unitFactor});
-  final String productId;
-  final String productUnitId;
-  final double quantity;
-  final double unitFactor;
-  double get baseQuantity => quantity * unitFactor;
-  Map<String, Object?> toJson() => {'product_id': productId, 'product_unit_id': productUnitId, 'quantity': quantity, 'unit_factor': unitFactor, 'base_quantity': baseQuantity};
 }

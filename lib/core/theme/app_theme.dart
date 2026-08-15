@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-
 import 'app_colors.dart';
 import 'app_theme_colors.dart';
 
-/// Premium Sand & Sage theme for the Offline-First accounting application.
+/// Premium Coastal Meadow theme for the Offline-First accounting application.
 ///
-/// Brand colors stay intentionally restrained. Luxury comes from hierarchy,
+/// Brand colors use Cerulean, Seagrass, Light Gold and Space Indigo while surfaces stay intentionally restrained. Luxury comes from hierarchy,
 /// typography, calm surfaces and subtle motion rather than saturated effects.
 abstract final class AppTheme {
   static ThemeData get dark => _build(
@@ -78,9 +76,10 @@ abstract final class AppTheme {
     required AppThemeColors colors,
   }) {
     final dark = brightness == Brightness.dark;
-    final baseText = GoogleFonts.tajawalTextTheme(
-      dark ? Typography.whiteCupertino : Typography.blackCupertino,
-    );
+    // Use bundled system fonts on desktop. This keeps startup fully offline
+    // and avoids runtime font downloads/failures. Segoe UI has strong Arabic
+    // support on Windows; Tahoma/Arial are fallbacks on other platforms.
+    final baseText = dark ? Typography.whiteMountainView : Typography.blackMountainView;
     final textTheme = baseText.copyWith(
       headlineLarge: baseText.headlineLarge?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -.7),
       headlineMedium: baseText.headlineMedium?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -.5),
@@ -97,9 +96,9 @@ abstract final class AppTheme {
     final scheme = ColorScheme(
       brightness: brightness,
       primary: colors.primary,
-      onPrimary: const Color(0xFF2E241B),
+      onPrimary: Colors.white,
       secondary: colors.secondary,
-      onSecondary: const Color(0xFF27301F),
+      onSecondary: const Color(0xFF222E50),
       error: colors.error,
       onError: dark ? const Color(0xFF2A1512) : Colors.white,
       surface: colors.bgElevated,
@@ -119,8 +118,10 @@ abstract final class AppTheme {
       canvasColor: colors.bgPage,
       dividerColor: colors.border,
       disabledColor: colors.textDim,
-      splashFactory: InkSparkle.splashFactory,
+      splashFactory: InkRipple.splashFactory,
       visualDensity: VisualDensity.standard,
+      fontFamily: 'Segoe UI',
+      fontFamilyFallback: const ['Tahoma', 'Arial'],
       textTheme: textTheme,
       primaryTextTheme: textTheme,
       extensions: [colors],
@@ -189,7 +190,7 @@ abstract final class AppTheme {
         style: FilledButton.styleFrom(
           elevation: 0,
           backgroundColor: colors.primary,
-          foregroundColor: const Color(0xFF2E241B),
+          foregroundColor: Colors.white,
           disabledBackgroundColor: colors.muted,
           disabledForegroundColor: colors.textDim,
           minimumSize: const Size(0, 46),
@@ -202,7 +203,7 @@ abstract final class AppTheme {
         style: ElevatedButton.styleFrom(
           elevation: 0,
           backgroundColor: colors.primary,
-          foregroundColor: const Color(0xFF2E241B),
+          foregroundColor: Colors.white,
           minimumSize: const Size(0, 46),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -229,7 +230,7 @@ abstract final class AppTheme {
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
           foregroundColor: colors.textSecondary,
-          hoverColor: colors.primary.withValues(alpha: .08),
+          hoverColor: Colors.transparent,
           highlightColor: colors.primary.withValues(alpha: .06),
         ),
       ),
@@ -239,7 +240,7 @@ abstract final class AppTheme {
           return states.contains(WidgetState.selected) ? colors.primary : Colors.transparent;
         }),
         side: BorderSide(color: colors.border),
-        checkColor: const WidgetStatePropertyAll(Color(0xFF2E241B)),
+        checkColor: const WidgetStatePropertyAll(Colors.white),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) =>
@@ -258,7 +259,7 @@ abstract final class AppTheme {
       tabBarTheme: TabBarThemeData(
         dividerColor: Colors.transparent,
         indicatorSize: TabBarIndicatorSize.tab,
-        labelColor: const Color(0xFF2E241B),
+        labelColor: Colors.white,
         unselectedLabelColor: colors.textSecondary,
         labelStyle: const TextStyle(fontWeight: FontWeight.w800),
         indicator: BoxDecoration(
@@ -290,7 +291,7 @@ abstract final class AppTheme {
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
-          color: dark ? const Color(0xFF353029) : const Color(0xFF332C25),
+          color: dark ? const Color(0xFF18213A) : const Color(0xFF222E50),
           borderRadius: BorderRadius.circular(10),
         ),
         textStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
@@ -298,7 +299,7 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         elevation: 14,
-        backgroundColor: dark ? const Color(0xFF353029) : const Color(0xFF332C25),
+        backgroundColor: dark ? const Color(0xFF18213A) : const Color(0xFF222E50),
         contentTextStyle: textTheme.bodyMedium?.copyWith(color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
@@ -320,9 +321,9 @@ abstract final class AppTheme {
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         elevation: 4,
-        hoverElevation: 8,
+        hoverElevation: 4,
         backgroundColor: colors.primary,
-        foregroundColor: const Color(0xFF2E241B),
+        foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(

@@ -3,6 +3,12 @@ import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:flutter/material.dart';
 
+/// Stable desktop sidebar item.
+///
+/// Deliberately avoids custom [MouseRegion] hover state. Rebuilding/moving a
+/// hovered region from inside onEnter/onExit can trigger Flutter's MouseTracker
+/// re-entrancy assertion on desktop. Selection and press feedback are enough
+/// for a responsive, predictable navigation rail.
 class DesktopSidebarItem extends StatefulWidget {
   const DesktopSidebarItem({
     super.key,
@@ -26,20 +32,22 @@ class DesktopSidebarItem extends StatefulWidget {
 }
 
 class _DesktopSidebarItemState extends State<DesktopSidebarItem> {
-  bool hovering = false;
   bool pressed = false;
+
+  void _setPressed(bool value) {
+    if (!mounted || pressed == value) return;
+    setState(() => pressed = value);
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final accent = widget.selected ? colors.primary : hovering ? colors.textPrimary : colors.textSecondary;
+    final accent = widget.selected ? colors.primary : colors.textSecondary;
     final background = widget.selected
         ? colors.primary.withValues(alpha: .105)
-        : hovering
-            ? colors.muted.withValues(alpha: .72)
-            : Colors.transparent;
+        : Colors.transparent;
 
-    Widget child = AnimatedScale(
+    final child = AnimatedScale(
       duration: AppMotion.fast,
       curve: AppMotion.curve,
       scale: pressed ? .985 : 1,
@@ -52,18 +60,22 @@ class _DesktopSidebarItemState extends State<DesktopSidebarItem> {
           color: background,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: widget.selected ? colors.primary.withValues(alpha: .18) : Colors.transparent,
+            color: widget.selected
+                ? colors.primary.withValues(alpha: .18)
+                : Colors.transparent,
           ),
         ),
         child: Row(
-          mainAxisAlignment: widget.collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+          mainAxisAlignment:
+              widget.collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
           children: [
-            AnimatedContainer(
-              duration: AppMotion.normal,
+            Container(
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: widget.selected ? colors.primary.withValues(alpha: .12) : Colors.transparent,
+                color: widget.selected
+                    ? colors.primary.withValues(alpha: .12)
+                    : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Stack(
@@ -72,21 +84,27 @@ class _DesktopSidebarItemState extends State<DesktopSidebarItem> {
                 children: [
                   Icon(widget.icon, size: 19, color: accent),
                   if (widget.badgeCount != null && widget.badgeCount! > 0)
-                    PositionedDirectional(top: -3, end: -5, child: _Badge(count: widget.badgeCount!)),
+                    PositionedDirectional(
+                      top: -3,
+                      end: -5,
+                      child: _Badge(count: widget.badgeCount!),
+                    ),
                 ],
               ),
             ),
             if (!widget.collapsed) ...[
               const SizedBox(width: 10),
               Expanded(
-                child: AnimatedDefaultTextStyle(
-                  duration: AppMotion.normal,
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: accent,
                     fontSize: 13,
-                    fontWeight: widget.selected ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight:
+                        widget.selected ? FontWeight.w800 : FontWeight.w600,
                   ),
-                  child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
               ),
               AnimatedOpacity(
@@ -99,7 +117,10 @@ class _DesktopSidebarItemState extends State<DesktopSidebarItem> {
                     color: colors.primary,
                     borderRadius: BorderRadius.circular(99),
                     boxShadow: [
-                      BoxShadow(color: colors.primary.withValues(alpha: .28), blurRadius: 8),
+                      BoxShadow(
+                        color: colors.primary.withValues(alpha: .28),
+                        blurRadius: 8,
+                      ),
                     ],
                   ),
                 ),
@@ -110,20 +131,15 @@ class _DesktopSidebarItemState extends State<DesktopSidebarItem> {
       ),
     );
 
-    if (widget.collapsed) child = Tooltip(message: widget.label, child: child);
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => hovering = true),
-      onExit: (_) => setState(() {
-        hovering = false;
-        pressed = false;
-      }),
+    return Semantics(
+      button: true,
+      selected: widget.selected,
+      label: widget.label,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => pressed = true),
-        onTapCancel: () => setState(() => pressed = false),
-        onTapUp: (_) => setState(() => pressed = false),
+        onTapDown: (_) => _setPressed(true),
+        onTapCancel: () => _setPressed(false),
+        onTapUp: (_) => _setPressed(false),
         onTap: widget.onTap,
         child: child,
       ),
@@ -149,7 +165,12 @@ class _Badge extends StatelessWidget {
       alignment: Alignment.center,
       child: Text(
         count > 99 ? '99+' : '$count',
-        style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w900, height: 1),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w900,
+          height: 1,
+        ),
       ),
     );
   }
@@ -157,7 +178,12 @@ class _Badge extends StatelessWidget {
 
 @immutable
 class SidebarItemModel {
-  const SidebarItemModel({required this.icon, required this.label, required this.routeType, this.badgeCount});
+  const SidebarItemModel({
+    required this.icon,
+    required this.label,
+    required this.routeType,
+    this.badgeCount,
+  });
   final IconData icon;
   final String label;
   final RouteType routeType;

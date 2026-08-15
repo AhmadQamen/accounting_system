@@ -28,10 +28,8 @@ class _GlobalKeyboardListenerState
     _keyboard = HardwareKeyboard.instance;
     _manager = ref.read(keyboardManagerProvider);
     _manager.on(KeyboardAction.escape, () {
-      final ctx = AccountingSystem.navigatorKey.currentContext;
-      final navigator = Navigator.of(ctx!);
-
-      if (navigator.canPop()) {
+      final navigator = AccountingSystem.navigatorKey.currentState;
+      if (navigator != null && navigator.canPop()) {
         navigator.pop();
       } else {
         AppNavigation.back();

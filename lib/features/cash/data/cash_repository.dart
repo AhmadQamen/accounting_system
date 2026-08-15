@@ -4,6 +4,7 @@ import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/services/cash_ledger_service.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
 import 'package:accounting_system/core/services/party_ledger_service.dart';
+import 'package:accounting_system/features/cash/models/cash_models.dart';
 
 class CashRepository {
   CashRepository(this._database);
@@ -12,27 +13,29 @@ class CashRepository {
   final _party = const PartyLedgerService();
   final _outbox = const OutboxService();
 
-  Future<List<Map<String, Object?>>> listCashboxes() async {
+  Future<List<Cashbox>> listCashboxes() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.query('cashboxes', where: 'entity_id=? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query('cashboxes', where: 'entity_id=? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    return rows.map(Cashbox.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> listExpenses() async {
+  Future<List<Expense>> listExpenses() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT e.*, c.name AS cashbox_name
 FROM expenses e JOIN cashboxes c ON c.id=e.cashbox_id
 WHERE e.entity_id=? AND e.deleted_at IS NULL
 ORDER BY e.occurred_at DESC LIMIT 500
 ''', [ctx.entityId]);
+    return rows.map(Expense.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> listTransfers() async {
+  Future<List<CashTransfer>> listTransfers() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT t.*, f.name AS from_cashbox_name, d.name AS to_cashbox_name
 FROM cash_transfers t
 JOIN cashboxes f ON f.id=t.from_cashbox_id
@@ -40,17 +43,19 @@ JOIN cashboxes d ON d.id=t.to_cashbox_id
 WHERE t.entity_id=? AND t.deleted_at IS NULL
 ORDER BY t.occurred_at DESC LIMIT 500
 ''', [ctx.entityId]);
+    return rows.map(CashTransfer.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> listAdjustments() async {
+  Future<List<CashAdjustment>> listAdjustments() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT a.*, c.name AS cashbox_name
 FROM cash_adjustments a JOIN cashboxes c ON c.id=a.cashbox_id
 WHERE a.entity_id=? AND a.deleted_at IS NULL
 ORDER BY a.occurred_at DESC LIMIT 500
 ''', [ctx.entityId]);
+    return rows.map(CashAdjustment.fromSql).toList(growable: false);
   }
 
   Future<String> postOpeningBalance({required String cashboxId, required int amountMinor, String? note}) async {
@@ -82,10 +87,10 @@ ORDER BY a.occurred_at DESC LIMIT 500
     return id;
   }
 
-  Future<List<Map<String, Object?>>> transactionHistory({String? cashboxId}) async {
+  Future<List<CashTransaction>> transactionHistory({String? cashboxId}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT t.*, c.name AS cashbox_name, p.name AS party_name
 FROM transactions t
 JOIN cashboxes c ON c.id=t.cashbox_id
@@ -93,6 +98,7 @@ LEFT JOIN parties p ON p.id=t.party_id
 WHERE t.entity_id=? ${cashboxId == null ? '' : 'AND t.cashbox_id=?'}
 ORDER BY t.occurred_at DESC LIMIT 1000
 ''', cashboxId == null ? [ctx.entityId] : [ctx.entityId, cashboxId]);
+    return rows.map(CashTransaction.fromSql).toList(growable: false);
   }
 
   Future<String> postExpense({required String cashboxId, required int amountMinor, String? note}) async {
@@ -182,7 +188,7 @@ ORDER BY t.occurred_at DESC LIMIT 1000
     return id;
   }
 
-  Future<Map<String, int>> closeSession({required String sessionId, required int countedAmountMinor}) async {
+  Future<CashSessionCloseResult> closeSession({required String sessionId, required int countedAmountMinor}) async {
     final ctx = await LocalContextService.instance.current;
     late int expected;
     late int difference;
@@ -198,18 +204,29 @@ ORDER BY t.occurred_at DESC LIMIT 1000
       await txn.update('cash_sessions', {'status': 'closed', 'closed_by': ctx.userId, 'expected_amount_minor': expected, 'counted_amount_minor': countedAmountMinor, 'difference_minor': difference, 'closed_at': now, 'updated_at': now}, where: 'id=?', whereArgs: [sessionId]);
       await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'cash_session', aggregateId: sessionId, action: 'close', payload: {'id': sessionId, 'expected_amount_minor': expected, 'counted_amount_minor': countedAmountMinor, 'difference_minor': difference});
     });
-    return {'expected': expected, 'difference': difference};
+    return CashSessionCloseResult(expectedMinor: expected, differenceMinor: difference);
   }
 
-  Future<List<Map<String, Object?>>> listSessions() async {
+  Future<List<CashSession>> listSessions() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    return db.rawQuery('''SELECT s.*, c.name cashbox_name FROM cash_sessions s JOIN cashboxes c ON c.id=s.cashbox_id WHERE s.entity_id=? ORDER BY s.opened_at DESC LIMIT 500''', [ctx.entityId]);
+    final rows = await db.rawQuery('''SELECT s.*, c.name cashbox_name FROM cash_sessions s JOIN cashboxes c ON c.id=s.cashbox_id WHERE s.entity_id=? ORDER BY s.opened_at DESC LIMIT 500''', [ctx.entityId]);
+    return rows.map(CashSession.fromSql).toList(growable: false);
   }
 
-  Future<List<Map<String, Object?>>> partyLedger(String partyId) async {
+  Future<List<PartyLedgerEntry>> partyLedger(String partyId) async {
     final db = await _database.database;
-    return db.query('party_ledger_entries', where: 'party_id=?', whereArgs: [partyId], orderBy: 'occurred_at DESC');
+    final rows = await db.query('party_ledger_entries', where: 'party_id=?', whereArgs: [partyId], orderBy: 'occurred_at DESC');
+    return rows.map(PartyLedgerEntry.fromSql).toList(growable: false);
+  }
+
+  Future<PartyAccountSnapshot> partyAccountSummary(String partyId) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final partyRows = await db.query('parties', columns: ['current_balance_minor'], where: 'id=? AND entity_id=?', whereArgs: [partyId, ctx.entityId], limit: 1);
+    final ledger = await partyLedger(partyId);
+    final balance = partyRows.isEmpty ? 0 : (partyRows.first['current_balance_minor'] as num).toInt();
+    return PartyAccountSnapshot(balanceMinor: balance, ledger: ledger);
   }
 
   String _number(String prefix, String deviceId, DateTime now) => '$prefix-${deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';

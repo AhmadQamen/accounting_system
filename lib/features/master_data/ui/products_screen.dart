@@ -2,9 +2,12 @@ import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/ui/product_details_dialog.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 
 class ProductsScreen extends ConsumerStatefulWidget {
   const ProductsScreen({super.key});
@@ -25,10 +28,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   @override
   Widget build(BuildContext context) {
     ref.watch(dataRevisionProvider);
-    final compact = MediaQuery.sizeOf(context).width < 900;
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: compact ? AppBar(title: const Text('المنتجات')) : null,
+    final compact = showCompactPageAppBar(context);
+    return MyScaffold(
+      appBar: compact ? const BlurAppBar(title: Text('المنتجات')) : null,
       body: PremiumPage(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -70,7 +72,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            FutureBuilder<List<Map<String, Object?>>>(
+            FutureBuilder<List<Product>>(
               future: ref.read(masterDataRepositoryProvider).listProducts(search: search.text),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
@@ -79,7 +81,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                 if (snapshot.hasError) {
                   return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل المنتجات', subtitle: '${snapshot.error}');
                 }
-                final rows = snapshot.data ?? const <Map<String, Object?>>[];
+                final rows = snapshot.data ?? const <Product>[];
                 if (rows.isEmpty) {
                   return EmptyState(
                     title: search.text.trim().isEmpty ? 'لا توجد منتجات بعد' : 'لا توجد نتائج مطابقة',
@@ -104,7 +106,6 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                         for (var i = 0; i < rows.length; i++)
                           SizedBox(
                             width: cardWidth,
-                            height: 154,
                             child: AnimatedEntrance(
                               delay: Duration(milliseconds: 100 + ((i % 8) * 30)),
                               child: _ProductCard(
@@ -143,7 +144,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           ],
         ),
         content: SizedBox(
-          width: 440,
+          width: responsiveDialogWidth(context, 440),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -177,14 +178,14 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
 
 class _ProductCard extends StatelessWidget {
   const _ProductCard({required this.product, required this.onTap});
-  final Map<String, Object?> product;
+  final Product product;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final minQty = ((product['min_quantity'] as num?) ?? 0).toDouble();
-    final name = '${product['name']}';
+    final minQty = product.minQuantity;
+    final name = product.name;
     final initials = name.trim().isEmpty ? '؟' : name.trim().substring(0, 1);
     return PremiumPanel(
       onTap: onTap,
@@ -207,14 +208,15 @@ class _ProductCard extends StatelessWidget {
                 child: Text(initials, style: TextStyle(color: colors.primary, fontSize: 17, fontWeight: FontWeight.w900)),
               ),
               const Spacer(),
+              const SizedBox(width: 10),
               Icon(Icons.chevron_left_rounded, size: 17, color: colors.textDim),
             ],
           ),
-          const Spacer(),
+          const SizedBox(height: 18),
           Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 14)),
           const SizedBox(height: 4),
           Text(
-            '${product['category_name'] ?? 'بدون تصنيف'} • ${product['primary_unit_name'] ?? 'وحدة'}',
+            '${product.categoryName ?? 'بدون تصنيف'} • ${product.primaryUnitName ?? 'وحدة'}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: colors.textSecondary, fontSize: 11),

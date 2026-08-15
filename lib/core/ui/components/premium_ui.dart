@@ -1,8 +1,32 @@
 import 'dart:math' as math;
 
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
+
+
+/// Whether a feature page should show its own compact AppBar.
+/// Windows is hosted inside [AppShell], which already provides a top bar.
+bool showCompactPageAppBar(BuildContext context) {
+  final narrow = MediaQuery.sizeOf(context).width < 900;
+  final hostedInDesktopShell =
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+  return narrow && !hostedInDesktopShell;
+}
+
+double responsiveDialogWidth(BuildContext context, double preferred, {double edgeInsets = 48}) {
+  final available = math.max(240.0, MediaQuery.sizeOf(context).width - edgeInsets);
+  return math.min(preferred, available);
+}
+
+double responsiveDialogHeight(BuildContext context, double preferred, {double edgeInsets = 48}) {
+  final available = math.max(240.0, MediaQuery.sizeOf(context).height - edgeInsets);
+  return math.min(preferred, available);
+}
 
 abstract final class AppMotion {
   static const fast = Duration(milliseconds: 150);
@@ -100,7 +124,7 @@ class PremiumPage extends StatelessWidget {
     return PremiumBackdrop(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final horizontal = constraints.maxWidth < 760 ? 16.0 : 28.0;
+          final horizontal = constraints.maxWidth < 440 ? 12.0 : constraints.maxWidth < 760 ? 16.0 : 28.0;
           return SingleChildScrollView(
             padding: padding.resolve(Directionality.of(context)).copyWith(
                   left: horizontal,
@@ -138,85 +162,103 @@ class PageIntro extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Wrap(
-      spacing: 18,
-      runSpacing: 16,
-      crossAxisAlignment: WrapCrossAlignment.center,
+
+    Widget intro = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 280, maxWidth: 760),
-          child: Row(
+        if (icon != null) ...[
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  colors.primary.withValues(alpha: .20),
+                  colors.secondary.withValues(alpha: .16),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.primary.withValues(alpha: .20)),
+            ),
+            child: Icon(icon, color: colors.primary, size: 23),
+          ),
+          const SizedBox(width: 14),
+        ],
+        Expanded(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon != null) ...[
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        colors.primary.withValues(alpha: .20),
-                        colors.secondary.withValues(alpha: .16),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: colors.primary.withValues(alpha: .20)),
+              if (eyebrow != null) ...[
+                Text(
+                  eyebrow!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.primary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .7,
                   ),
-                  child: Icon(icon, color: colors.primary, size: 23),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(height: 5),
               ],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (eyebrow != null) ...[
-                      Text(
-                        eyebrow!,
-                        style: TextStyle(
-                          color: colors.primary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: .7,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                    ],
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: colors.textPrimary,
-                            letterSpacing: -.5,
-                            height: 1.15,
-                          ),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: colors.textPrimary,
+                      letterSpacing: -.5,
+                      height: 1.15,
                     ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        subtitle!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: colors.textSecondary,
-                              height: 1.55,
-                            ),
-                      ),
-                    ],
-                  ],
-                ),
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  subtitle!,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.55,
+                      ),
+                ),
+              ],
             ],
           ),
         ),
-        if (actions.isNotEmpty)
-          Row(mainAxisSize: MainAxisSize.min, children: _spaced(actions, 8)),
       ],
+    );
+
+    if (actions.isEmpty) return intro;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 720;
+        final actionWrap = Wrap(spacing: 8, runSpacing: 8, children: actions);
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              intro,
+              const SizedBox(height: 14),
+              Align(alignment: AlignmentDirectional.centerStart, child: actionWrap),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: intro),
+            const SizedBox(width: 18),
+            Flexible(child: actionWrap),
+          ],
+        );
+      },
     );
   }
 }
 
-class PremiumPanel extends StatefulWidget {
+class PremiumPanel extends StatelessWidget {
   const PremiumPanel({
     super.key,
     required this.child,
@@ -232,63 +274,47 @@ class PremiumPanel extends StatefulWidget {
   final VoidCallback? onTap;
   final Color? accent;
   final double borderRadius;
+
+  /// Kept for API compatibility. Desktop hover no longer moves widgets under
+  /// the pointer because that can recursively retrigger MouseTracker updates.
   final bool hoverLift;
-
-  @override
-  State<PremiumPanel> createState() => _PremiumPanelState();
-}
-
-class _PremiumPanelState extends State<PremiumPanel> {
-  bool _hovering = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final accent = widget.accent ?? colors.primary;
+    final accentColor = accent ?? colors.primary;
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final lift = widget.hoverLift && _hovering;
 
-    return MouseRegion(
-      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: AnimatedContainer(
-        duration: AppMotion.normal,
-        curve: AppMotion.curve,
-        transform: Matrix4.translationValues(0, lift ? -3 : 0, 0),
-        decoration: BoxDecoration(
-          color: colors.bgElevated.withValues(alpha: dark ? .94 : .96),
-          borderRadius: BorderRadius.circular(widget.borderRadius),
-          border: Border.all(
-            color: lift
-                ? accent.withValues(alpha: .26)
-                : colors.border.withValues(alpha: dark ? .85 : 1),
+    final panel = Container(
+      decoration: BoxDecoration(
+        color: colors.bgElevated.withValues(alpha: dark ? .94 : .96),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(color: colors.border.withValues(alpha: dark ? .85 : 1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? .18 : .045),
+            blurRadius: 20,
+            spreadRadius: -10,
+            offset: const Offset(0, 8),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: dark ? .18 : .045),
-              blurRadius: lift ? 30 : 20,
-              spreadRadius: lift ? -8 : -10,
-              offset: Offset(0, lift ? 12 : 8),
-            ),
-            if (lift)
-              BoxShadow(
-                color: accent.withValues(alpha: .08),
-                blurRadius: 30,
-                spreadRadius: -12,
-              ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(widget.borderRadius),
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(widget.borderRadius),
-            splashColor: accent.withValues(alpha: .07),
-            highlightColor: accent.withValues(alpha: .035),
-            child: Padding(padding: widget.padding, child: widget.child),
+        ],
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+
+    if (onTap == null) return panel;
+
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(color: accentColor.withValues(alpha: .06)),
           ),
+          child: panel,
         ),
       ),
     );
@@ -323,65 +349,70 @@ class MetricCard extends StatelessWidget {
       accent: accent,
       hoverLift: true,
       padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: accent.withValues(alpha: .17)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 112),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: accent.withValues(alpha: .17)),
+                  ),
+                  child: Icon(icon, color: accent, size: 21),
                 ),
-                child: Icon(icon, color: accent, size: 21),
-              ),
-              const Spacer(),
-              if (badge != null)
-                StatusPill(label: badge!, color: accent, compact: true),
-            ],
-          ),
-          const Spacer(),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: colors.textSecondary,
+                const SizedBox(width: 10),
+                if (badge != null)
+                  Flexible(
+                    child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: StatusPill(label: badge!, color: accent, compact: true),
+                    ),
+                  )
+                else
+                  const Spacer(),
+              ],
             ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              color: colors.textPrimary,
-              letterSpacing: -.35,
-            ),
-          ),
-          if (caption != null) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: 18),
             Text(
-              caption!,
+              label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: colors.textDim),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: colors.textSecondary),
             ),
+            const SizedBox(height: 5),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: colors.textPrimary,
+                  letterSpacing: -.35,
+                ),
+              ),
+            ),
+            if (caption != null) ...[
+              const SizedBox(height: 5),
+              Text(caption!, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: colors.textDim)),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
-class QuickActionTile extends StatefulWidget {
+class QuickActionTile extends StatelessWidget {
   const QuickActionTile({
     super.key,
     required this.icon,
@@ -398,75 +429,60 @@ class QuickActionTile extends StatefulWidget {
   final Color? accent;
 
   @override
-  State<QuickActionTile> createState() => _QuickActionTileState();
-}
-
-class _QuickActionTileState extends State<QuickActionTile> {
-  bool _hover = false;
-
-  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final accent = widget.accent ?? colors.primary;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+    final accentColor = accent ?? colors.primary;
+
+    return Semantics(
+      button: true,
+      label: label,
       child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: AppMotion.normal,
-          curve: AppMotion.curve,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: _hover ? accent.withValues(alpha: .10) : colors.muted.withValues(alpha: .60),
+            color: colors.muted.withValues(alpha: .60),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: _hover ? accent.withValues(alpha: .22) : colors.border,
-            ),
+            border: Border.all(color: colors.border),
           ),
           child: Row(
             children: [
-              AnimatedContainer(
-                duration: AppMotion.normal,
+              Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: accent.withValues(alpha: _hover ? .18 : .11),
+                  color: accentColor.withValues(alpha: .11),
                   borderRadius: BorderRadius.circular(13),
                 ),
-                child: AnimatedScale(
-                  duration: AppMotion.fast,
-                  scale: _hover ? 1.08 : 1,
-                  child: Icon(widget.icon, color: accent, size: 20),
-                ),
+                child: Icon(icon, color: accentColor, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.label,
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
-                        )),
-                    if (widget.subtitle != null) ...[
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
                       const SizedBox(height: 2),
-                      Text(widget.subtitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colors.textDim, fontSize: 11)),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: colors.textDim, fontSize: 11),
+                      ),
                     ],
                   ],
                 ),
               ),
-              AnimatedSlide(
-                duration: AppMotion.normal,
-                offset: _hover ? Offset.zero : const Offset(-.12, 0),
-                child: Icon(Icons.chevron_left_rounded, size: 17, color: _hover ? accent : colors.textDim),
-              ),
+              Icon(Icons.chevron_left_rounded, size: 17, color: accentColor),
             ],
           ),
         ),
@@ -490,29 +506,48 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: TextStyle(
-                    color: colors.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -.2,
-                  )),
-              if (subtitle != null) ...[
-                const SizedBox(height: 3),
-                Text(subtitle!, style: TextStyle(color: colors.textDim, fontSize: 11.5)),
-              ],
-            ],
+        Text(
+          title,
+          style: TextStyle(
+            color: colors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -.2,
           ),
         ),
-        if (trailing != null) trailing!,
+        if (subtitle != null) ...[
+          const SizedBox(height: 3),
+          Text(subtitle!, style: TextStyle(color: colors.textDim, fontSize: 11.5)),
+        ],
       ],
+    );
+
+    if (trailing == null) return titleBlock;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 460) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              titleBlock,
+              const SizedBox(height: 10),
+              Align(alignment: AlignmentDirectional.centerStart, child: trailing!),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(child: titleBlock),
+            const SizedBox(width: 10),
+            Flexible(child: trailing!),
+          ],
+        );
+      },
     );
   }
 }
@@ -549,6 +584,8 @@ class StatusPill extends StatelessWidget {
           ],
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: compact ? 10 : 11,
@@ -672,16 +709,13 @@ class _AnimatedEntranceState extends State<AnimatedEntrance> {
 
   @override
   Widget build(BuildContext context) {
+    // Fade-only entrance: keeps the premium motion without moving hit-test
+    // regions underneath a stationary desktop pointer.
     return AnimatedOpacity(
       duration: AppMotion.slow,
       curve: AppMotion.curve,
       opacity: _visible ? 1 : 0,
-      child: AnimatedSlide(
-        duration: AppMotion.slow,
-        curve: AppMotion.curve,
-        offset: _visible ? Offset.zero : widget.offset,
-        child: widget.child,
-      ),
+      child: widget.child,
     );
   }
 }

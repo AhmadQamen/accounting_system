@@ -4,9 +4,10 @@ import 'package:iconsax/iconsax.dart';
 
 enum SubscriptionStatus { premium, trial, expired }
 
-/// Pinned footer of the desktop sidebar — a compact user card with name,
-/// email, and a subscription status pill. Never scrolls with the nav list.
-class SidebarFooter extends StatefulWidget {
+/// Pinned user summary for the desktop sidebar.
+/// No custom hover listener is used; this keeps pointer tracking stable while
+/// the sidebar switches between expanded/collapsed layouts.
+class SidebarFooter extends StatelessWidget {
   const SidebarFooter({
     super.key,
     required this.userName,
@@ -14,6 +15,7 @@ class SidebarFooter extends StatefulWidget {
     required this.status,
     this.avatarUrl,
     this.onTap,
+    this.collapsed = false,
   });
 
   final String userName;
@@ -21,75 +23,80 @@ class SidebarFooter extends StatefulWidget {
   final SubscriptionStatus status;
   final String? avatarUrl;
   final VoidCallback? onTap;
-
-  @override
-  State<SidebarFooter> createState() => _SidebarFooterState();
-}
-
-class _SidebarFooterState extends State<SidebarFooter> {
-  bool _hovering = false;
+  final bool collapsed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 14),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _hovering ? colors.bgElevated : colors.muted,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border, width: 1),
-            ),
-            child: Row(
+    if (collapsed) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 14),
+        child: Semantics(
+          label: userName,
+          child: Center(child: _Avatar(name: userName, avatarUrl: avatarUrl)),
+        ),
+      );
+    }
+
+    final card = Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.muted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border, width: 1),
+      ),
+      child: Row(
+        children: [
+          _Avatar(name: userName, avatarUrl: avatarUrl),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _Avatar(name: widget.userName, avatarUrl: widget.avatarUrl),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.userName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.userEmail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      _SubscriptionBadge(status: widget.status),
-                    ],
+                Text(
+                  userName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
                   ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  userEmail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _SubscriptionBadge(status: status),
               ],
             ),
           ),
-        ),
+        ],
       ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 14),
+      child: onTap == null
+          ? card
+          : Semantics(
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onTap,
+                child: card,
+              ),
+            ),
     );
   }
 }
@@ -156,17 +163,9 @@ class _SubscriptionBadge extends StatelessWidget {
     final colors = context.colors;
 
     final (Color color, IconData icon, String label) = switch (status) {
-      SubscriptionStatus.premium => (
-        colors.success,
-        Iconsax.crown_1,
-        'Premium',
-      ),
+      SubscriptionStatus.premium => (colors.success, Iconsax.crown_1, 'Premium'),
       SubscriptionStatus.trial => (colors.amber, Iconsax.clock, 'Trial'),
-      SubscriptionStatus.expired => (
-        colors.error,
-        Iconsax.warning_2,
-        'Expired',
-      ),
+      SubscriptionStatus.expired => (colors.error, Iconsax.warning_2, 'Expired'),
     };
 
     return Container(

@@ -1,6 +1,7 @@
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 
 class ModernSplashScreen extends StatefulWidget {
   const ModernSplashScreen({super.key});
@@ -35,7 +36,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Scaffold(
+    return MyScaffold(
       body: PremiumBackdrop(
         child: Center(
           child: FadeTransition(
@@ -66,7 +67,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                     child: Icon(
                       Icons.account_balance_wallet_rounded,
                       size: 42,
-                      color: colors.textPrimary,
+                      color: colors.onPrimary,
                     ),
                   ),
                 ),
@@ -74,16 +75,16 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                 Text(
                   'نظام المحاسبة',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.3,
-                  ),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.3,
+                      ),
                 ),
                 const SizedBox(height: 7),
                 Text(
                   'إدارة مالية تعمل معك دائماً',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(color: colors.textSecondary),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: colors.textSecondary,
+                      ),
                 ),
                 const SizedBox(height: 28),
                 SizedBox(

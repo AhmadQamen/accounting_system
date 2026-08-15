@@ -3,7 +3,10 @@ import 'package:accounting_system/core/navigation/app_navigation.dart';
 import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/blur_appbar.dart';
+import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/features/reports/models/report_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
@@ -14,20 +17,14 @@ class AccountingHome extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataRevisionProvider);
-    final currency = ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
-    final compact = MediaQuery.sizeOf(context).width < 900;
+    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final compact = showCompactPageAppBar(context);
     final repo = ref.read(reportsRepositoryProvider);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: compact ? AppBar(title: const Text('لوحة التحكم')) : null,
-      body: FutureBuilder<List<Object>>(
-        future: Future.wait<Object>([
-          repo.dashboard(),
-          repo.dashboardTrends(),
-          repo.recentActivity(),
-          repo.lowStockItems(),
-        ]),
+    return MyScaffold(
+      appBar: compact ? const BlurAppBar(title: Text('لوحة التحكم')) : null,
+      body: FutureBuilder<DashboardData>(
+        future: repo.dashboardData(),
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const _DashboardLoading();
@@ -42,11 +39,12 @@ class AccountingHome extends ConsumerWidget {
             );
           }
 
-          final data = snapshot.data![0] as Map<String, int>;
-          final trends = snapshot.data![1] as Map<String, List<int>>;
-          final activity = snapshot.data![2] as List<Map<String, Object?>>;
-          final lowStock = snapshot.data![3] as List<Map<String, Object?>>;
-          String money(String key) => _money(context, data[key] ?? 0, currency);
+          final dashboard = snapshot.data!;
+          final data = dashboard.metrics;
+          final trends = dashboard.trends;
+          final activity = dashboard.recentActivity;
+          final lowStock = dashboard.lowStockItems;
+          String money(int value) => _money(context, value, currency);
 
           return PremiumPage(
             child: Column(
@@ -76,29 +74,29 @@ class AccountingHome extends ConsumerWidget {
                 AnimatedEntrance(
                   delay: const Duration(milliseconds: 70),
                   child: _HeroOverview(
-                    cash: money('cash'),
-                    salesToday: money('salesToday'),
-                    purchasesToday: money('purchasesToday'),
-                    pendingSync: data['pendingSync'] ?? 0,
-                    salesTrend: (trends['sales'] ?? const <int>[]).map((e) => e.toDouble()).toList(),
-                    purchasesTrend: (trends['purchases'] ?? const <int>[]).map((e) => e.toDouble()).toList(),
+                    cash: money(data.cash),
+                    salesToday: money(data.salesToday),
+                    purchasesToday: money(data.purchasesToday),
+                    pendingSync: data.pendingSync,
+                    salesTrend: trends.sales.map((e) => e.toDouble()).toList(),
+                    purchasesTrend: trends.purchases.map((e) => e.toDouble()).toList(),
                   ),
                 ),
                 const SizedBox(height: 18),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.maxWidth;
-                    final columns = width >= 1180 ? 4 : width >= 720 ? 2 : 1;
+                    final columns = width >= 1120 ? 4 : width >= 840 ? 3 : width >= 540 ? 2 : 1;
                     final itemWidth = (width - ((columns - 1) * 12)) / columns;
                     final metrics = [
-                      ('مبيعات اليوم', money('salesToday'), Iconsax.receipt_1, context.colors.success, RouteType.sales, 'المبيعات المعتمدة'),
-                      ('مشتريات اليوم', money('purchasesToday'), Iconsax.shopping_cart, context.colors.secondary, RouteType.purchases, 'المشتريات المعتمدة'),
-                      ('ذمم العملاء', money('customerReceivables'), Iconsax.people, context.colors.info, RouteType.customers, 'مبالغ مستحقة لنا'),
-                      ('ذمم الموردين', money('supplierPayables'), Iconsax.truck_fast, context.colors.warning, RouteType.suppliers, 'مبالغ مستحقة علينا'),
-                      ('قيمة المخزون', money('inventoryValue'), Iconsax.box_1, context.colors.primary, RouteType.inventory, 'حسب التكلفة الحالية'),
-                      ('مخزون منخفض', '${data['lowStock'] ?? 0}', Iconsax.warning_2, context.colors.error, RouteType.inventory, 'يحتاج متابعة'),
-                      ('رصيد الصناديق', money('cash'), Iconsax.wallet_money, context.colors.primary, RouteType.cashboxes, 'جميع الصناديق'),
-                      ('المزامنة', '${data['pendingSync'] ?? 0}', Iconsax.refresh, context.colors.textSecondary, RouteType.settings, 'عمليات بانتظار الإرسال'),
+                      ('مبيعات اليوم', money(data.salesToday), Iconsax.receipt_1, context.colors.success, RouteType.sales, 'المبيعات المعتمدة'),
+                      ('مشتريات اليوم', money(data.purchasesToday), Iconsax.shopping_cart, context.colors.secondary, RouteType.purchases, 'المشتريات المعتمدة'),
+                      ('ذمم العملاء', money(data.customerReceivables), Iconsax.people, context.colors.info, RouteType.customers, 'مبالغ مستحقة لنا'),
+                      ('ذمم الموردين', money(data.supplierPayables), Iconsax.truck_fast, context.colors.warning, RouteType.suppliers, 'مبالغ مستحقة علينا'),
+                      ('قيمة المخزون', money(data.inventoryValue), Iconsax.box_1, context.colors.primary, RouteType.inventory, 'حسب التكلفة الحالية'),
+                      ('مخزون منخفض', '${data.lowStock}', Iconsax.warning_2, context.colors.error, RouteType.inventory, 'يحتاج متابعة'),
+                      ('رصيد الصناديق', money(data.cash), Iconsax.wallet_money, context.colors.primary, RouteType.cashboxes, 'جميع الصناديق'),
+                      ('المزامنة', '${data.pendingSync}', Iconsax.refresh, context.colors.textSecondary, RouteType.settings, 'عمليات بانتظار الإرسال'),
                     ];
                     return Wrap(
                       spacing: 12,
@@ -107,7 +105,6 @@ class AccountingHome extends ConsumerWidget {
                         for (var i = 0; i < metrics.length; i++)
                           SizedBox(
                             width: itemWidth,
-                            height: 154,
                             child: AnimatedEntrance(
                               delay: Duration(milliseconds: 120 + (i * 28)),
                               child: MetricCard(
@@ -117,7 +114,7 @@ class AccountingHome extends ConsumerWidget {
                                 accent: metrics[i].$4,
                                 caption: metrics[i].$6,
                                 onTap: () => AppNavigation.open(AppRoute(type: metrics[i].$5)),
-                                badge: i == 7 && (data['pendingSync'] ?? 0) == 0 ? 'متزامن' : null,
+                                badge: i == 7 && (data.pendingSync) == 0 ? 'متزامن' : null,
                               ),
                             ),
                           ),
@@ -205,7 +202,7 @@ class _HeroOverview extends StatelessWidget {
               padding: const EdgeInsets.all(24),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final stacked = constraints.maxWidth < 830;
+                  final stacked = constraints.maxWidth < 900;
                   final balance = _BalanceBlock(
                     cash: cash,
                     salesToday: salesToday,
@@ -220,10 +217,15 @@ class _HeroOverview extends StatelessWidget {
                     );
                   }
                   return Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(flex: 6, child: balance),
-                      Container(width: 1, margin: const EdgeInsets.symmetric(horizontal: 28), color: colors.border),
+                      Container(
+                        width: 1,
+                        height: 220,
+                        margin: const EdgeInsets.symmetric(horizontal: 28),
+                        color: colors.border,
+                      ),
                       Expanded(flex: 5, child: chart),
                     ],
                   );
@@ -251,35 +253,47 @@ class _BalanceBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [colors.primary, colors.primary.withValues(alpha: .72)]),
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [BoxShadow(color: colors.primary.withValues(alpha: .20), blurRadius: 18, offset: const Offset(0, 8))],
-              ),
-              child: const Icon(Iconsax.wallet_3, color: Color(0xFF2E241B), size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('السيولة المتاحة', style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.w700, fontSize: 12)),
-                  const SizedBox(height: 2),
-                  Text('رصيد جميع الصناديق', style: TextStyle(color: colors.textDim, fontSize: 10.5)),
-                ],
-              ),
-            ),
-            StatusPill(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final identity = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [colors.primary, colors.primary.withValues(alpha: .72)]),
+                    borderRadius: BorderRadius.circular(15),
+                    boxShadow: [BoxShadow(color: colors.primary.withValues(alpha: .20), blurRadius: 18, offset: const Offset(0, 8))],
+                  ),
+                  child: const Icon(Iconsax.wallet_3, color: Color(0xFF08111F), size: 22),
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('السيولة المتاحة', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.w700, fontSize: 12)),
+                      const SizedBox(height: 2),
+                      Text('رصيد جميع الصناديق', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+            final sync = StatusPill(
               label: pendingSync == 0 ? 'محلي محفوظ' : '$pendingSync بانتظار المزامنة',
               color: pendingSync == 0 ? colors.success : colors.warning,
               icon: pendingSync == 0 ? Iconsax.tick_circle : Iconsax.refresh,
-            ),
-          ],
+            );
+            if (constraints.maxWidth < 430) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [identity, const SizedBox(height: 12), Align(alignment: AlignmentDirectional.centerStart, child: sync)],
+              );
+            }
+            return Row(children: [Expanded(child: identity), const SizedBox(width: 12), Flexible(child: sync)]);
+          },
         ),
         const SizedBox(height: 18),
         FittedBox(
@@ -320,22 +334,25 @@ class _HeroStat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .075),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: .14)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 7),
-          Text(label, style: TextStyle(color: colors.textSecondary, fontSize: 10.5, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 7),
-          Text(value, style: TextStyle(color: colors.textPrimary, fontSize: 11.5, fontWeight: FontWeight.w900)),
-        ],
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 300),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .075),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: .14)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 7),
+            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textSecondary, fontSize: 10.5, fontWeight: FontWeight.w700))),
+            const SizedBox(width: 7),
+            Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerStart, child: Text(value, style: TextStyle(color: colors.textPrimary, fontSize: 11.5, fontWeight: FontWeight.w900)))),
+          ],
+        ),
       ),
     );
   }
@@ -355,12 +372,15 @@ class _TrendBlock extends StatelessWidget {
       children: [
         const SectionHeader(title: 'نبض آخر 7 أيام', subtitle: 'حركة المبيعات والمشتريات اليومية'),
         const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(child: _TrendSeries(label: 'المبيعات', values: sales, color: colors.success)),
-            const SizedBox(width: 16),
-            Expanded(child: _TrendSeries(label: 'المشتريات', values: purchases, color: colors.secondary)),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final salesCard = _TrendSeries(label: 'المبيعات', values: sales, color: colors.success);
+            final purchaseCard = _TrendSeries(label: 'المشتريات', values: purchases, color: colors.secondary);
+            if (constraints.maxWidth < 430) {
+              return Column(children: [salesCard, const SizedBox(height: 12), purchaseCard]);
+            }
+            return Row(children: [Expanded(child: salesCard), const SizedBox(width: 12), Expanded(child: purchaseCard)]);
+          },
         ),
       ],
     );
@@ -397,7 +417,7 @@ class _TrendSeries extends StatelessWidget {
 
 class _RecentActivity extends StatelessWidget {
   const _RecentActivity({required this.activity, required this.currency});
-  final List<Map<String, Object?>> activity;
+  final List<ActivityItem> activity;
   final String currency;
 
   @override
@@ -434,43 +454,73 @@ class _RecentActivity extends StatelessWidget {
 
 class _ActivityRow extends StatelessWidget {
   const _ActivityRow({required this.row, required this.currency});
-  final Map<String, Object?> row;
+  final ActivityItem row;
   final String currency;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final kind = '${row['kind']}';
+    final kind = row.kind;
     final (icon, color, label) = switch (kind) {
       'sale' => (Iconsax.receipt_1, colors.success, 'بيع'),
       'purchase' => (Iconsax.shopping_cart, colors.secondary, 'شراء'),
       _ => (Iconsax.money_send, colors.error, 'مصروف'),
     };
-    final amount = ((row['amount_minor'] as num?) ?? 0).toInt();
-    final date = DateTime.tryParse('${row['occurred_at']}')?.toLocal();
+    final amount = row.amountMinor;
+    final date = row.occurredAt?.toLocal();
     final dateLabel = date == null ? '' : '${date.day}/${date.month} • ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    final amountLabel = Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 11),
-      child: Row(
-        children: [
-          Container(width: 38, height: 38, decoration: BoxDecoration(color: color.withValues(alpha: .10), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 18)),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 430;
+          final identity = Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(color: color.withValues(alpha: .10), borderRadius: BorderRadius.circular(12)),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$label • ${row.displayNumber}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text('${row.partyName ?? dateLabel}${row.partyName == null ? '' : ' • $dateLabel'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('$label • ${row['display_number']}', style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 2),
-                Text('${row['party_name'] ?? dateLabel}${row['party_name'] == null ? '' : ' • $dateLabel'}', style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+                identity,
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 49),
+                  child: Text(amountLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontSize: 12, fontWeight: FontWeight.w900)),
+                ),
               ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
-            style: TextStyle(color: colors.textPrimary, fontSize: 12, fontWeight: FontWeight.w900),
-          ),
-        ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: identity),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(amountLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontSize: 12, fontWeight: FontWeight.w900)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -478,7 +528,7 @@ class _ActivityRow extends StatelessWidget {
 
 class _StockAttention extends StatelessWidget {
   const _StockAttention({required this.rows});
-  final List<Map<String, Object?>> rows;
+  final List<LowStockItem> rows;
 
   @override
   Widget build(BuildContext context) {
@@ -522,27 +572,44 @@ class _StockAttention extends StatelessWidget {
 
 class _StockRow extends StatelessWidget {
   const _StockRow({required this.row});
-  final Map<String, Object?> row;
+  final LowStockItem row;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final qty = ((row['current_quantity'] as num?) ?? 0).toDouble();
-    final min = ((row['min_quantity'] as num?) ?? 0).toDouble();
+    final qty = row.currentQuantity;
+    final min = row.minQuantity;
     final ratio = min <= 0 ? 0.0 : (qty / min).clamp(0.0, 1.0);
+    final quantityLabel = '${qty.toStringAsFixed(qty.truncateToDouble() == qty ? 0 : 2)} / ${min.toStringAsFixed(min.truncateToDouble() == min ? 0 : 2)}';
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 11),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(child: Text('${row['product_name']}', style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w800))),
-              Text('${qty.toStringAsFixed(qty.truncateToDouble() == qty ? 0 : 2)} / ${min.toStringAsFixed(min.truncateToDouble() == min ? 0 : 2)}', style: TextStyle(color: colors.error, fontSize: 11, fontWeight: FontWeight.w800)),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 330) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(row.productName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 4),
+                    Text(quantityLabel, style: TextStyle(color: colors.error, fontSize: 11, fontWeight: FontWeight.w800)),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: Text(row.productName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w800))),
+                  const SizedBox(width: 8),
+                  Text(quantityLabel, style: TextStyle(color: colors.error, fontSize: 11, fontWeight: FontWeight.w800)),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 4),
-          Text('${row['warehouse_name']}', style: TextStyle(color: colors.textDim, fontSize: 10.5)),
+          Text(row.warehouseName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textDim, fontSize: 10.5)),
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(99),

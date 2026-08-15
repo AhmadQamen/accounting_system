@@ -27,16 +27,23 @@ class AppDatabase {
     return _database!;
   }
 
-  Future<Database> _initDB() async {
+  void _configureFactoryForPlatform() {
     if (Platform.isWindows || Platform.isLinux) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
+  }
+
+  Future<Database> _initDB() async {
+    _configureFactoryForPlatform();
     final dbPath = await getPath;
     return databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
         version: dbVersion,
+        onConfigure: (db) async {
+          await db.execute('PRAGMA foreign_keys = ON');
+        },
         onCreate: createSchema,
         onUpgrade: migrate,
       ),
@@ -108,9 +115,13 @@ class AppDatabase {
   }
 
   Future<void> deleteDB() async {
+    _configureFactoryForPlatform();
     final dbPath = await getPath;
     await close();
     await databaseFactory.deleteDatabase(dbPath);
+    // Reset the in-memory workspace identifiers as well; the next open will
+    // bootstrap a fresh local entity/year/warehouse/cashbox.
+    // Import is intentionally avoided here to keep the database layer low-level.
   }
 
   Future<String> get getPath async {
