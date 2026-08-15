@@ -1,4 +1,5 @@
 import 'dart:ui';
+
 import 'package:accounting_system/core/configs/breakpoints.dart';
 import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/core/navigation/desktop_navigation_controller.dart';
@@ -6,6 +7,7 @@ import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
+
 import 'sidebar_footer.dart';
 import 'sidebar_header.dart';
 import 'sidebar_item.dart';
@@ -104,7 +106,7 @@ class DesktopSidebar extends ConsumerWidget {
           routeType: RouteType.parties,
         ),
         SidebarItemModel(
-          icon: Iconsax.user_tick,
+          icon: Icons.access_alarm_outlined,
           label: 'العملاء',
           routeType: RouteType.customers,
         ),
@@ -144,7 +146,7 @@ class DesktopSidebar extends ConsumerWidget {
           routeType: RouteType.reports,
         ),
         SidebarItemModel(
-          icon: Iconsax.calendar_1,
+          icon: Icons.abc_outlined,
           label: 'السنوات المالية',
           routeType: RouteType.financialYears,
         ),
@@ -162,40 +164,60 @@ class DesktopSidebar extends ConsumerWidget {
     final colors = context.colors;
     final currentRoute = ref.watch(currentRouteProvider);
     final navController = ref.read(desktopNavControllerProvider);
+
     return SizedBox(
-      width: Breakpoints.sidebarWidth,
+      width: Breakpoints.sidebarWidth + 12,
       height: double.infinity,
-      child: ClipRRect(
+      child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Column(
-            children: [
-              const SidebarHeader(
-                appName: 'Accounting System',
-                subtitle: 'Offline Accounting',
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.bgElevated.withValues(alpha: .70),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  colors.bgElevated.withValues(alpha: .90),
+                  colors.bgPage.withValues(alpha: .80),
+                ],
               ),
-              Divider(height: 1, color: colors.border),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.only(top: 16),
-                  children: [
-                    for (final section in _sections)
-                      SidebarSection(
-                        section: section,
-                        currentRouteType: currentRoute.type,
-                        onItemTap: (type) =>
-                            navController.push(AppRoute(type: type)),
-                      ),
-                  ],
+            ),
+            child: Column(
+              children: [
+                const SidebarHeader(),
+                Container(
+                  height: 1,
+                  margin: const EdgeInsets.symmetric(horizontal: 14),
+                  color: colors.border.withValues(alpha: .8),
                 ),
-              ),
-              Divider(height: 1, color: colors.border),
-              const SidebarFooter(
-                userName: 'Local Admin',
-                userEmail: 'Offline first',
-                status: SubscriptionStatus.premium,
-              ),
-            ],
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.only(top: 16, bottom: 8),
+                    children: [
+                      for (final section in _sections)
+                        SidebarSection(
+                          section: section,
+                          currentRouteType: currentRoute.type,
+                          onItemTap:
+                              (type) =>
+                                  navController.push(AppRoute(type: type)),
+                        ),
+                    ],
+                  ),
+                ),
+                Container(
+                  height: 1,
+                  margin: const EdgeInsets.symmetric(horizontal: 14),
+                  color: colors.border.withValues(alpha: .8),
+                ),
+                const SidebarFooter(
+                  userName: 'المستخدم المحلي',
+                  userEmail: 'البيانات محفوظة على الجهاز',
+                  status: SubscriptionStatus.premium,
+                ),
+              ],
+            ),
           ),
         ),
       ),

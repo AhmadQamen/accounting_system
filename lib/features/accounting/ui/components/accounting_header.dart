@@ -117,21 +117,21 @@ class _HomeHeaderState extends State<HomeHeader> {
                         const SizedBox(height: 2),
                         _visible
                             ? _AnimatedBalance(
-                                value: widget.balance,
-                                currency: widget.currency,
-                                formatter: _format,
-                                color: colors.textPrimary,
-                                currencyColor: colors.textSecondary,
-                              )
+                              value: widget.balance,
+                              currency: widget.currency,
+                              formatter: _format,
+                              color: colors.textPrimary,
+                              currencyColor: colors.textSecondary,
+                            )
                             : Text(
-                                '••••••',
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                  color: colors.textPrimary,
-                                  letterSpacing: 2,
-                                ),
+                              '••••••',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: colors.textPrimary,
+                                letterSpacing: 2,
                               ),
+                            ),
                       ],
                     ),
                   ),
@@ -239,7 +239,7 @@ class _QuickStatsRow extends StatelessWidget {
         if (income != null)
           Expanded(
             child: _StatPill(
-              icon: Iconsax.arrow_down_1,
+              icon: Icons.access_time_rounded,
               label: 'دخل اليوم',
               value: formatter(income!),
               isPositive: true,

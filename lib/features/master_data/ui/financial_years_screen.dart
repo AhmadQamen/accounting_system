@@ -1,6 +1,9 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:iconsax/iconsax.dart';
 
 class FinancialYearsScreen extends ConsumerWidget {
   const FinancialYearsScreen({super.key});
@@ -8,65 +11,156 @@ class FinancialYearsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataRevisionProvider);
-    final currentId = ref.watch(localContextProvider).asData?.value?.financialYearId;
+    final currentId =
+        ref.watch(localContextProvider).asData?.value?.financialYearId;
+    final compact = MediaQuery.sizeOf(context).width < 900;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('السنوات المالية')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _createYear(context, ref),
-        child: const Icon(Icons.add),
-      ),
-      body: FutureBuilder<List<Map<String, Object?>>>(
-        future: ref.read(masterDataRepositoryProvider).listFinancialYears(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
-          final rows = snapshot.data ?? const <Map<String, Object?>>[];
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: rows.length,
-            itemBuilder: (context, index) {
-              final row = rows[index];
-              final id = row['id'] as String;
-              final isOpen = (row['is_open'] as num).toInt() == 1;
-              final isCurrent = id == currentId;
-              return Card(
-                child: ListTile(
-                  leading: Icon(isOpen ? Icons.lock_open : Icons.lock),
-                  title: Row(
-                    children: [
-                      Text('${row['name']}'),
-                      if (isCurrent) ...[
-                        const SizedBox(width: 8),
-                        const Chip(label: Text('الحالية')),
-                      ],
-                    ],
+      backgroundColor: Colors.transparent,
+      appBar: compact ? AppBar(title: const Text('السنوات المالية')) : null,
+      body: PremiumPage(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AnimatedEntrance(
+              child: PageIntro(
+                eyebrow: 'FINANCIAL PERIODS',
+                title: 'السنوات المالية',
+                subtitle:
+                    'افصل الفترات المحاسبية بوضوح، وحدد السنة الحالية قبل اعتماد المستندات.',
+                icon: Icons.calendar_month_outlined,
+                actions: [
+                  FilledButton.icon(
+                    onPressed: () => _createYear(context, ref),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('سنة مالية جديدة'),
                   ),
-                  subtitle: Text('${row['starts_on']} — ${row['ends_on']}'),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) => _handleAction(context, ref, id, value),
-                    itemBuilder: (context) => [
-                      if (isOpen && !isCurrent)
-                        const PopupMenuItem(value: 'activate', child: Text('تعيين كسنة حالية')),
-                      if (isOpen && !isCurrent)
-                        const PopupMenuItem(value: 'close', child: Text('إغلاق السنة')),
-                    ],
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(isOpen ? 'مفتوحة' : 'مغلقة'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            FutureBuilder<List<Map<String, Object?>>>(
+              future:
+                  ref.read(masterDataRepositoryProvider).listFinancialYears(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const SizedBox(
+                    height: 320,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (snapshot.hasError)
+                  return EmptyState(
+                    icon: Iconsax.warning_2,
+                    title: 'تعذر تحميل السنوات المالية',
+                    subtitle: '${snapshot.error}',
+                  );
+                final rows = snapshot.data ?? const <Map<String, Object?>>[];
+                final openCount =
+                    rows
+                        .where(
+                          (r) => ((r['is_open'] as num?) ?? 0).toInt() == 1,
+                        )
+                        .length;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final narrow = constraints.maxWidth < 680;
+                        final width =
+                            narrow
+                                ? constraints.maxWidth
+                                : (constraints.maxWidth - 12) / 2;
+                        return Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            SizedBox(
+                              width: width,
+                              height: 132,
+                              child: MetricCard(
+                                label: 'الفترات المسجلة',
+                                value: '${rows.length}',
+                                icon: Icons.calendar_month_outlined,
+                                accent: context.colors.primary,
+                                caption: '$openCount مفتوحة حالياً',
+                              ),
+                            ),
+                            SizedBox(
+                              width: width,
+                              height: 132,
+                              child: MetricCard(
+                                label: 'السنة الحالية',
+                                value:
+                                    rows
+                                        .where((r) => r['id'] == currentId)
+                                        .map((e) => '${e['name']}')
+                                        .firstOrNull ??
+                                    '—',
+                                icon: Iconsax.tick_circle,
+                                accent: context.colors.success,
+                                caption: 'تستقبل المستندات الجديدة',
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                    const SizedBox(height: 14),
+                    AnimatedEntrance(
+                      delay: const Duration(milliseconds: 100),
+                      child: PremiumPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SectionHeader(
+                              title: 'السجل المالي',
+                              subtitle: 'الفترات المفتوحة والمغلقة والحالية',
+                            ),
+                            const SizedBox(height: 14),
+                            if (rows.isEmpty)
+                              const EmptyState(
+                                title: 'لا توجد سنوات مالية',
+                                subtitle:
+                                    'أنشئ سنة مالية قبل البدء بإدخال المستندات.',
+                                icon: Icons.calendar_month_outlined,
+                              )
+                            else
+                              ...rows.indexed.map(
+                                (entry) => _YearRow(
+                                  row: entry.$2,
+                                  currentId: currentId,
+                                  showDivider: entry.$1 != rows.length - 1,
+                                  onAction:
+                                      (action) => _handleAction(
+                                        context,
+                                        ref,
+                                        entry.$2['id'] as String,
+                                        action,
+                                      ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Future<void> _handleAction(BuildContext context, WidgetRef ref, String id, String action) async {
+  Future<void> _handleAction(
+    BuildContext context,
+    WidgetRef ref,
+    String id,
+    String action,
+  ) async {
     try {
       if (action == 'activate') {
         await ref.read(masterDataRepositoryProvider).activateFinancialYear(id);
@@ -74,20 +168,33 @@ class FinancialYearsScreen extends ConsumerWidget {
       } else if (action == 'close') {
         final confirmed = await showDialog<bool>(
           context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('إغلاق السنة المالية'),
-            content: const Text('بعد الإغلاق لن يمكن إنشاء مستندات جديدة على هذه السنة.'),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('إغلاق')),
-            ],
-          ),
+          builder:
+              (dialogContext) => AlertDialog(
+                title: const Text('إغلاق السنة المالية'),
+                content: const Text(
+                  'بعد الإغلاق لن يمكن إنشاء مستندات جديدة على هذه السنة.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('إلغاء'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('إغلاق'),
+                  ),
+                ],
+              ),
         );
-        if (confirmed == true) await ref.read(masterDataRepositoryProvider).closeFinancialYear(id);
+        if (confirmed == true)
+          await ref.read(masterDataRepositoryProvider).closeFinancialYear(id);
       }
       ref.read(dataRevisionProvider.notifier).state++;
     } catch (error) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      if (context.mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
     }
   }
 
@@ -99,52 +206,243 @@ class FinancialYearsScreen extends ConsumerWidget {
     var end = DateTime(nextYear, 12, 31, 23, 59, 59);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('سنة مالية جديدة'),
-          content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: name, decoration: const InputDecoration(labelText: 'اسم السنة')),
-                const SizedBox(height: 12),
-                ListTile(
-                  title: const Text('تاريخ البداية'),
-                  subtitle: Text('${start.year}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}'),
-                  trailing: const Icon(Icons.calendar_month),
-                  onTap: () async {
-                    final picked = await showDatePicker(context: dialogContext, initialDate: start, firstDate: DateTime(2000), lastDate: DateTime(2200));
-                    if (picked != null) setLocal(() => start = picked);
-                  },
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_month_outlined,
+                        color: context.colors.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      const Text('سنة مالية جديدة'),
+                    ],
+                  ),
+                  content: SizedBox(
+                    width: 470,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: name,
+                          decoration: const InputDecoration(
+                            labelText: 'اسم السنة',
+                            prefixIcon: Icon(Icons.calendar_month_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _DateChoice(
+                          title: 'تاريخ البداية',
+                          date: start,
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: dialogContext,
+                              initialDate: start,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2200),
+                            );
+                            if (picked != null) setLocal(() => start = picked);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        _DateChoice(
+                          title: 'تاريخ النهاية',
+                          date: end,
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: dialogContext,
+                              initialDate: end,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2200),
+                            );
+                            if (picked != null)
+                              setLocal(
+                                () =>
+                                    end = DateTime(
+                                      picked.year,
+                                      picked.month,
+                                      picked.day,
+                                      23,
+                                      59,
+                                      59,
+                                    ),
+                              );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      icon: const Icon(Iconsax.tick_circle, size: 17),
+                      label: const Text('إنشاء'),
+                    ),
+                  ],
                 ),
-                ListTile(
-                  title: const Text('تاريخ النهاية'),
-                  subtitle: Text('${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}'),
-                  trailing: const Icon(Icons.calendar_month),
-                  onTap: () async {
-                    final picked = await showDatePicker(context: dialogContext, initialDate: end, firstDate: DateTime(2000), lastDate: DateTime(2200));
-                    if (picked != null) setLocal(() => end = DateTime(picked.year, picked.month, picked.day, 23, 59, 59));
-                  },
-                ),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('إنشاء')),
-          ],
-        ),
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(masterDataRepositoryProvider).createFinancialYear(name: name.text, startsOn: start, endsOn: end);
+        await ref
+            .read(masterDataRepositoryProvider)
+            .createFinancialYear(name: name.text, startsOn: start, endsOn: end);
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (error) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        if (context.mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$error')));
       }
     }
     name.dispose();
   }
+}
+
+class _YearRow extends StatelessWidget {
+  const _YearRow({
+    required this.row,
+    required this.currentId,
+    required this.showDivider,
+    required this.onAction,
+  });
+  final Map<String, Object?> row;
+  final String? currentId;
+  final bool showDivider;
+  final ValueChanged<String> onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final id = row['id'] as String;
+    final open = ((row['is_open'] as num?) ?? 0).toInt() == 1;
+    final current = id == currentId;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: (open ? colors.success : colors.textSecondary)
+                      .withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  open ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
+                  color: open ? colors.success : colors.textSecondary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            '${row['name']}',
+                            style: TextStyle(
+                              color: colors.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (current) ...[
+                          const SizedBox(width: 8),
+                          StatusPill(
+                            label: 'الحالية',
+                            color: colors.primary,
+                            compact: true,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${row['starts_on']} — ${row['ends_on']}',
+                      style: TextStyle(color: colors.textDim, fontSize: 10.5),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(
+                label: open ? 'مفتوحة' : 'مغلقة',
+                color: open ? colors.success : colors.textSecondary,
+                compact: true,
+              ),
+              if (open && !current)
+                PopupMenuButton<String>(
+                  onSelected: onAction,
+                  itemBuilder:
+                      (_) => const [
+                        PopupMenuItem(
+                          value: 'activate',
+                          child: ListTile(
+                            leading: Icon(Iconsax.tick_circle),
+                            title: Text('تعيين كسنة حالية'),
+                            dense: true,
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'close',
+                          child: ListTile(
+                            leading: Icon(Icons.lock_outline_rounded),
+                            title: Text('إغلاق السنة'),
+                            dense: true,
+                          ),
+                        ),
+                      ],
+                ),
+            ],
+          ),
+        ),
+        if (showDivider) Divider(height: 1, color: colors.border),
+      ],
+    );
+  }
+}
+
+class _DateChoice extends StatelessWidget {
+  const _DateChoice({
+    required this.title,
+    required this.date,
+    required this.onTap,
+  });
+  final String title;
+  final DateTime date;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: context.colors.muted.withValues(alpha: .55),
+      borderRadius: BorderRadius.circular(14),
+      child: ListTile(
+        onTap: onTap,
+        leading: const Icon(Icons.calendar_month_outlined),
+        title: Text(title),
+        subtitle: Text(
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
+        ),
+        trailing: const Icon(Icons.chevron_left_rounded, size: 17),
+      ),
+    );
+  }
+}
+
+extension _IterableFirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

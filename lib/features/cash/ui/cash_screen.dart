@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
-import 'package:accounting_system/core/ui/components/my_scaffold.dart';
+import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
@@ -81,144 +81,423 @@ class _CashScreenState extends ConsumerState<CashScreen>
   @override
   Widget build(BuildContext context) {
     ref.watch(dataRevisionProvider);
-    final colors = context.colors;
     final currency =
-        ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
-
-    return MyScaffold(
-      appBar: _GlassAppBar(title: title, icon: modeIcon),
-      floatingActionButton: _GlowFab(
-        label: fabLabel,
-        onTap: () => _action(context, ref),
+        ref.watch(localContextProvider).asData?.value?.currencyCode ?? 'USD';
+    final compact = MediaQuery.sizeOf(context).width < 900;
+    final (icon, accent, subtitle) = switch (mode) {
+      CashScreenMode.cashboxes => (
+        Iconsax.wallet_money,
+        context.colors.primary,
+        'أرصدة الصناديق وسجل الحركة والتسويات.',
       ),
-      body: FutureBuilder<List<Map<String, Object?>>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('${snapshot.error}'));
-          }
-          final rows = snapshot.data ?? const <Map<String, Object?>>[];
-          if (rows.isEmpty) {
-            return _EmptyState(icon: modeIcon, label: 'لا توجد بيانات بعد');
-          }
-          return RefreshIndicator(
-            color: colors.primary,
-            backgroundColor: colors.bgElevated,
-            onRefresh: () async {
-              _reload();
-              await _future;
-            },
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              itemCount: rows.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder:
-                  (context, index) => _AnimatedRow(
-                    controller: _entrance,
-                    index: index,
-                    total: rows.length,
-                    child: _row(context, ref, rows[index], currency),
+      CashScreenMode.expenses => (
+        Iconsax.money_send,
+        context.colors.error,
+        'مصروفات معتمدة مرتبطة بالصندوق مباشرة.',
+      ),
+      CashScreenMode.transfers => (
+        Iconsax.convert_card,
+        context.colors.info,
+        'تحويلات داخلية موثقة بين الصناديق.',
+      ),
+      CashScreenMode.sessions => (
+        Iconsax.clock,
+        context.colors.secondary,
+        'فتح وإغلاق جلسات الصندوق ومطابقة النقد.',
+      ),
+    };
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: compact ? AppBar(title: Text(title)) : null,
+      body: PremiumPage(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AnimatedEntrance(
+              child: PageIntro(
+                eyebrow: 'CASH MANAGEMENT',
+                title: title,
+                subtitle: subtitle,
+                icon: icon,
+                actions: [
+                  FilledButton.icon(
+                    onPressed: () => _action(context, ref),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: Text(switch (mode) {
+                      CashScreenMode.cashboxes => 'صندوق جديد',
+                      CashScreenMode.expenses => 'مصروف جديد',
+                      CashScreenMode.transfers => 'تحويل جديد',
+                      CashScreenMode.sessions => 'فتح جلسة',
+                    }),
                   ),
+                ],
+              ),
             ),
-          );
-        },
+            const SizedBox(height: 20),
+            FutureBuilder<List<Map<String, Object?>>>(
+              future: _load(ref),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const SizedBox(
+                    height: 360,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return EmptyState(
+                    icon: Iconsax.warning_2,
+                    title: 'تعذر تحميل البيانات',
+                    subtitle: '${snapshot.error}',
+                  );
+                }
+                final rows = snapshot.data ?? const <Map<String, Object?>>[];
+                final total = switch (mode) {
+                  CashScreenMode.cashboxes => rows.fold<int>(
+                    0,
+                    (sum, row) =>
+                        sum +
+                        (((row['current_balance_minor'] as num?) ?? 0).toInt()),
+                  ),
+                  CashScreenMode.expenses => rows.fold<int>(
+                    0,
+                    (sum, row) =>
+                        sum + (((row['amount_minor'] as num?) ?? 0).toInt()),
+                  ),
+                  CashScreenMode.transfers => rows.fold<int>(
+                    0,
+                    (sum, row) =>
+                        sum + (((row['amount_minor'] as num?) ?? 0).toInt()),
+                  ),
+                  CashScreenMode.sessions =>
+                    rows.where((row) => row['status'] == 'open').length,
+                };
+                final totalLabel =
+                    mode == CashScreenMode.sessions
+                        ? '$total'
+                        : Money(total).format(
+                          locale: Localizations.localeOf(context).toString(),
+                          currencyCode: currency,
+                        );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final narrow = constraints.maxWidth < 700;
+                        final width =
+                            narrow
+                                ? constraints.maxWidth
+                                : (constraints.maxWidth - 12) / 2;
+                        return Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            SizedBox(
+                              width: width,
+                              height: 132,
+                              child: AnimatedEntrance(
+                                delay: const Duration(milliseconds: 60),
+                                child: MetricCard(
+                                  label: switch (mode) {
+                                    CashScreenMode.cashboxes =>
+                                      'إجمالي السيولة',
+                                    CashScreenMode.expenses =>
+                                      'إجمالي المصروفات',
+                                    CashScreenMode.transfers =>
+                                      'قيمة التحويلات',
+                                    CashScreenMode.sessions =>
+                                      'الجلسات المفتوحة',
+                                  },
+                                  value: totalLabel,
+                                  icon: icon,
+                                  accent: accent,
+                                  caption: switch (mode) {
+                                    CashScreenMode.cashboxes =>
+                                      'من دفتر حركات الصندوق',
+                                    CashScreenMode.expenses =>
+                                      '${rows.length} مستند مصروف',
+                                    CashScreenMode.transfers =>
+                                      '${rows.length} تحويل',
+                                    CashScreenMode.sessions =>
+                                      '${rows.length} جلسة في السجل',
+                                  },
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: width,
+                              height: 132,
+                              child: AnimatedEntrance(
+                                delay: const Duration(milliseconds: 95),
+                                child: MetricCard(
+                                  label: 'عدد السجلات',
+                                  value: '${rows.length}',
+                                  icon: Icons.description_outlined,
+                                  accent: context.colors.secondary,
+                                  caption: 'بيانات محفوظة محلياً',
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    AnimatedEntrance(
+                      delay: const Duration(milliseconds: 140),
+                      child: PremiumPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SectionHeader(
+                              title: 'السجل',
+                              subtitle:
+                                  rows.isEmpty
+                                      ? 'لا توجد حركات مسجلة بعد'
+                                      : 'آخر البيانات أولاً',
+                              trailing:
+                                  rows.isEmpty
+                                      ? null
+                                      : StatusPill(
+                                        label: '${rows.length} سجل',
+                                        color: accent,
+                                        icon: icon,
+                                      ),
+                            ),
+                            const SizedBox(height: 12),
+                            if (rows.isEmpty)
+                              EmptyState(
+                                title: 'لا توجد بيانات بعد',
+                                subtitle:
+                                    'استخدم زر الإضافة في الأعلى لإنشاء أول سجل.',
+                                icon: icon,
+                              )
+                            else
+                              ...rows.indexed.map(
+                                (entry) => _cashRow(
+                                  context,
+                                  ref,
+                                  entry.$2,
+                                  currency,
+                                  showDivider: entry.$1 != rows.length - 1,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _row(
+  Future<List<Map<String, Object?>>> _load(WidgetRef ref) => switch (mode) {
+    CashScreenMode.cashboxes =>
+      ref.read(cashRepositoryProvider).listCashboxes(),
+    CashScreenMode.expenses => ref.read(cashRepositoryProvider).listExpenses(),
+    CashScreenMode.transfers =>
+      ref.read(cashRepositoryProvider).listTransfers(),
+    CashScreenMode.sessions => ref.read(cashRepositoryProvider).listSessions(),
+  };
+
+  Widget _cashRow(
     BuildContext context,
     WidgetRef ref,
     Map<String, Object?> row,
-    String currency,
-  ) {
+    String currency, {
+    required bool showDivider,
+  }) {
     final colors = context.colors;
-    String money(num v) => Money(v.toInt()).format(
-      locale: Localizations.localeOf(context).toString(),
-      currencyCode: currency,
-    );
+    late final IconData icon;
+    late final Color accent;
+    late final String titleText;
+    late final String subtitleText;
+    late final Widget trailing;
+    VoidCallback? onTap;
 
     if (mode == CashScreenMode.cashboxes) {
-      return _CashTile(
-        icon: Iconsax.wallet_2,
-        iconColor: colors.primary,
-        title: '${row['name']}',
-        subtitle: 'الرصيد الحالي من دفتر حركات الصندوق',
-        trailingValue: money(row['current_balance_minor'] as num),
-        trailingValueColor: colors.textPrimary,
-        onTap: () => _history(context, ref, row['id'] as String, currency),
-        menu: PopupMenuButton<String>(
-          icon: Icon(Iconsax.more, size: 18, color: colors.textSecondary),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+      icon = Iconsax.wallet_3;
+      accent = colors.primary;
+      titleText = '${row['name']}';
+      subtitleText = 'الرصيد الحالي من دفتر الحركات';
+      trailing = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            Money((row['current_balance_minor'] as num).toInt()).format(
+              locale: Localizations.localeOf(context).toString(),
+              currencyCode: currency,
+            ),
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+            ),
           ),
-          onSelected: (value) async {
-            if (value == 'opening') {
-              await _openingBalance(context, ref, row['id'] as String);
-            }
-            if (value == 'adjust') {
-              await _adjustment(context, ref, row['id'] as String);
-            }
-          },
-          itemBuilder:
-              (_) => const [
-                PopupMenuItem(value: 'opening', child: Text('رصيد افتتاحي')),
-                PopupMenuItem(value: 'adjust', child: Text('تسوية الصندوق')),
-              ],
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'opening')
+                await _openingBalance(context, ref, row['id'] as String);
+              if (value == 'adjust')
+                await _adjustment(context, ref, row['id'] as String);
+            },
+            itemBuilder:
+                (_) => const [
+                  PopupMenuItem(
+                    value: 'opening',
+                    child: ListTile(
+                      leading: Icon(Icons.add_box_outlined),
+                      title: Text('رصيد افتتاحي'),
+                      dense: true,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'adjust',
+                    child: ListTile(
+                      leading: Icon(Icons.tune_rounded),
+                      title: Text('تسوية الصندوق'),
+                      dense: true,
+                    ),
+                  ),
+                ],
+          ),
+        ],
+      );
+      onTap = () => _history(context, ref, row['id'] as String, currency);
+    } else if (mode == CashScreenMode.expenses) {
+      icon = Iconsax.money_send;
+      accent = colors.error;
+      titleText = '${row['expense_number']}';
+      subtitleText =
+          '${row['cashbox_name']} • ${_prettyDate('${row['occurred_at']}')}';
+      trailing = Text(
+        Money((row['amount_minor'] as num).toInt()).format(
+          locale: Localizations.localeOf(context).toString(),
+          currencyCode: currency,
+        ),
+        style: TextStyle(
+          color: colors.error,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
         ),
       );
-    }
-
-    if (mode == CashScreenMode.expenses) {
-      return _CashTile(
-        icon: Iconsax.money_send,
-        iconColor: colors.error,
-        title: '${row['expense_number']}',
-        subtitle: '${row['cashbox_name']} • ${row['occurred_at']}',
-        trailingValue: '-${money(row['amount_minor'] as num)}',
-        trailingValueColor: colors.error,
+    } else if (mode == CashScreenMode.transfers) {
+      icon = Iconsax.convert_card;
+      accent = colors.info;
+      titleText = '${row['transfer_number']}';
+      subtitleText =
+          '${row['from_cashbox_name']} ← ${row['to_cashbox_name']} • ${_prettyDate('${row['occurred_at']}')}';
+      trailing = Text(
+        Money((row['amount_minor'] as num).toInt()).format(
+          locale: Localizations.localeOf(context).toString(),
+          currencyCode: currency,
+        ),
+        style: TextStyle(
+          color: colors.textPrimary,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
       );
-    }
-
-    if (mode == CashScreenMode.transfers) {
-      return _CashTile(
-        icon: Iconsax.arrow_swap_horizontal,
-        iconColor: colors.secondary,
-        title: '${row['transfer_number']}',
-        subtitle:
-            '${row['from_cashbox_name']} ← ${row['to_cashbox_name']} • ${row['occurred_at']}',
-        trailingValue: money(row['amount_minor'] as num),
-        trailingValueColor: colors.textPrimary,
-      );
-    }
-
-    final open = row['status'] == 'open';
-    return _CashTile(
-      icon: open ? Iconsax.unlock : Iconsax.lock_1,
-      iconColor: open ? colors.success : colors.textSecondary,
-      title: '${row['cashbox_name']}',
-      subtitle: '${row['status']} • ${row['opened_at']}',
-      trailingWidget:
+    } else {
+      final open = row['status'] == 'open';
+      icon = open ? Icons.lock_open_rounded : Icons.lock_outline_rounded;
+      accent = open ? colors.success : colors.textSecondary;
+      titleText = '${row['cashbox_name']}';
+      subtitleText =
+          '${open ? 'جلسة مفتوحة' : 'جلسة مغلقة'} • ${_prettyDate('${row['opened_at']}')}';
+      trailing =
           open
-              ? _StatusChip(label: 'مفتوحة', color: colors.success)
+              ? StatusPill(
+                label: 'مفتوحة',
+                color: colors.success,
+                icon: Icons.lock_open_rounded,
+                compact: true,
+              )
               : Text(
-                'فرق: ${row['difference_minor'] ?? 0}',
-                style: TextStyle(color: colors.textSecondary, fontSize: 13),
-              ),
-      onTap:
+                'فرق ${Money(((row['difference_minor'] as num?) ?? 0).toInt()).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              );
+      onTap =
           open
               ? () => _closeSession(context, ref, row['id'] as String, currency)
-              : null,
+              : null;
+    }
+
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: .10),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(icon, color: accent, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          titleText,
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitleText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colors.textDim,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  trailing,
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (showDivider) Divider(height: 1, color: colors.border),
+      ],
     );
   }
 
-  // ================= منطق الأكشنز — بدون أي تغيير =================
+  String _prettyDate(String raw) {
+    final d = DateTime.tryParse(raw)?.toLocal();
+    if (d == null) return raw;
+    return '${d.day}/${d.month}/${d.year} • ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
 
   Future<void> _action(BuildContext context, WidgetRef ref) async {
     final boxes = await ref.read(cashRepositoryProvider).listCashboxes();
