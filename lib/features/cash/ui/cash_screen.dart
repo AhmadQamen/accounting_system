@@ -62,15 +62,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     super.dispose();
   }
 
-  Future<List<Map<String, Object?>>> _load(WidgetRef ref) => switch (mode) {
-    CashScreenMode.cashboxes =>
-      ref.read(cashRepositoryProvider).listCashboxes(),
-    CashScreenMode.expenses => ref.read(cashRepositoryProvider).listExpenses(),
-    CashScreenMode.transfers =>
-      ref.read(cashRepositoryProvider).listTransfers(),
-    CashScreenMode.sessions => ref.read(cashRepositoryProvider).listSessions(),
-  };
-
   void _reload() {
     setState(() => _future = _load(ref));
     _entrance
