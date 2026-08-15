@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
@@ -13,20 +11,9 @@ import 'package:iconsax/iconsax.dart';
 
 enum CashScreenMode { cashboxes, expenses, transfers, sessions }
 
-class CashScreen extends ConsumerStatefulWidget {
+class CashScreen extends ConsumerWidget {
   const CashScreen({super.key, required this.mode});
   final CashScreenMode mode;
-
-  @override
-  ConsumerState<CashScreen> createState() => _CashScreenState();
-}
-
-class _CashScreenState extends ConsumerState<CashScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _entrance;
-  late Future<List<Map<String, Object?>>> _future;
-
-  CashScreenMode get mode => widget.mode;
 
   String get title => switch (mode) {
     CashScreenMode.cashboxes => 'الصناديق',
@@ -35,45 +22,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     CashScreenMode.sessions => 'جلسات الصندوق',
   };
 
-  IconData get modeIcon => switch (mode) {
-    CashScreenMode.cashboxes => Iconsax.wallet_money,
-    CashScreenMode.expenses => Iconsax.money_send,
-    CashScreenMode.transfers => Iconsax.arrow_swap_horizontal,
-    CashScreenMode.sessions => Iconsax.timer_1,
-  };
-
-  String get fabLabel => switch (mode) {
-    CashScreenMode.cashboxes => 'صندوق جديد',
-    CashScreenMode.expenses => 'مصروف جديد',
-    CashScreenMode.transfers => 'تحويل جديد',
-    CashScreenMode.sessions => 'فتح جلسة',
-  };
-
   @override
-  void initState() {
-    super.initState();
-    _entrance = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    )..forward();
-    _future = _load(ref);
-  }
-
-  @override
-  void dispose() {
-    _entrance.dispose();
-    super.dispose();
-  }
-
-  void _reload() {
-    setState(() => _future = _load(ref));
-    _entrance
-      ..reset()
-      ..forward();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataRevisionProvider);
     final currency =
         ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
@@ -550,19 +500,28 @@ class _CashScreenState extends ConsumerState<CashScreen>
         final ok = await showDialog<bool>(
           context: context,
           builder:
-              (dialogContext) => _ThemedDialog(
-                title: 'صندوق جديد',
-                content: _ThemedField(controller: controller, label: 'الاسم'),
-                confirmLabel: 'حفظ',
-                onCancel: () => Navigator.pop(dialogContext, false),
-                onConfirm: () => Navigator.pop(dialogContext, true),
+              (dialogContext) => AlertDialog(
+                title: const Text('صندوق جديد'),
+                content: TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(labelText: 'الاسم'),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('إلغاء'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('حفظ'),
+                  ),
+                ],
               ),
         );
-        if (ok == true && controller.text.trim().isNotEmpty) {
+        if (ok == true && controller.text.trim().isNotEmpty)
           await ref
               .read(masterDataRepositoryProvider)
               .saveCashbox(name: controller.text);
-        }
         controller.dispose();
       } else if (boxes.isEmpty) {
         throw StateError('أضف صندوقاً أولاً');
@@ -578,7 +537,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
           amount,
           note,
         );
-        if (ok) {
+        if (ok)
           await ref
               .read(cashRepositoryProvider)
               .postExpense(
@@ -586,7 +545,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 amountMinor: Money.fromMajor(amount.text),
                 note: note.text,
               );
-        }
         amount.dispose();
         note.dispose();
       } else if (mode == CashScreenMode.transfers) {
@@ -603,20 +561,21 @@ class _CashScreenState extends ConsumerState<CashScreen>
           amount,
           null,
         );
-        if (ok) {
+        if (ok)
           await ref
               .read(cashRepositoryProvider)
               .openSession(
                 cashboxId: box,
                 openingAmountMinor: Money.fromMajor(amount.text),
               );
-        }
         amount.dispose();
       }
       ref.read(dataRevisionProvider.notifier).state++;
-      if (context.mounted) _reload();
     } catch (e) {
-      if (context.mounted) _showError(context, '$e');
+      if (context.mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -652,6 +611,16 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ],
               ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('اعتماد'),
+              ),
+            ],
           ),
     );
     if (ok == true) {
@@ -664,9 +633,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
               note: note.text,
             );
         ref.read(dataRevisionProvider.notifier).state++;
-        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) _showError(context, '$e');
+        if (context.mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
     amount.dispose();
@@ -707,9 +678,34 @@ class _CashScreenState extends ConsumerState<CashScreen>
                             labelText: 'الاتجاه',
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: amount,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'المبلغ',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: note,
+                          decoration: const InputDecoration(
+                            labelText: 'سبب التسوية',
+                          ),
+                        ),
                       ],
                     ),
                   ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('اعتماد'),
+                    ),
+                  ],
                 ),
           ),
     );
@@ -724,9 +720,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
               note: note.text,
             );
         ref.read(dataRevisionProvider.notifier).state++;
-        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) _showError(context, '$e');
+        if (context.mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
     amount.dispose();
@@ -743,7 +741,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
         .read(cashRepositoryProvider)
         .transactionHistory(cashboxId: cashboxId);
     if (!context.mounted) return;
-    final colors = context.colors;
     await showDialog<void>(
       context: context,
       builder:
@@ -925,24 +922,27 @@ class _CashScreenState extends ConsumerState<CashScreen>
                       ],
                     ),
                   ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('تحويل'),
+                    ),
+                  ],
                 ),
           ),
     );
-    if (ok == true) {
-      try {
-        await ref
-            .read(cashRepositoryProvider)
-            .postTransfer(
-              fromCashboxId: from,
-              toCashboxId: to,
-              amountMinor: Money.fromMajor(amount.text),
-            );
-        ref.read(dataRevisionProvider.notifier).state++;
-        if (context.mounted) _reload();
-      } catch (e) {
-        if (context.mounted) _showError(context, '$e');
-      }
-    }
+    if (ok == true)
+      await ref
+          .read(cashRepositoryProvider)
+          .postTransfer(
+            fromCashboxId: from,
+            toCashboxId: to,
+            amountMinor: Money.fromMajor(amount.text),
+          );
     amount.dispose();
   }
 
@@ -956,16 +956,25 @@ class _CashScreenState extends ConsumerState<CashScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder:
-          (dialogContext) => _ThemedDialog(
-            title: 'إغلاق جلسة الصندوق',
-            content: _ThemedField(
+          (dialogContext) => AlertDialog(
+            title: const Text('إغلاق جلسة الصندوق'),
+            content: TextField(
               controller: counted,
-              label: 'المبلغ المعدود فعلياً',
               keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'المبلغ المعدود فعلياً',
+              ),
             ),
-            confirmLabel: 'إغلاق',
-            onCancel: () => Navigator.pop(dialogContext, false),
-            onConfirm: () => Navigator.pop(dialogContext, true),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('إغلاق'),
+              ),
+            ],
           ),
     );
     if (ok == true) {
@@ -991,7 +1000,10 @@ class _CashScreenState extends ConsumerState<CashScreen>
           );
         }
       } catch (e) {
-        if (context.mounted) _showError(context, '$e');
+        if (context.mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
     counted.dispose();
@@ -1035,515 +1047,46 @@ class _CashScreenState extends ConsumerState<CashScreen>
                               onBox(value);
                             }
                           },
+                          decoration: const InputDecoration(
+                            labelText: 'الصندوق',
+                          ),
                         ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: amount,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'المبلغ',
+                          ),
+                        ),
+                        if (note != null) ...[
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: note,
+                            decoration: const InputDecoration(
+                              labelText: 'ملاحظة',
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () {
+                        onBox(box);
+                        Navigator.pop(dialogContext, true);
+                      },
+                      child: const Text('اعتماد'),
+                    ),
+                  ],
                 ),
           ),
     );
     return ok == true;
-  }
-
-  void _showError(BuildContext context, String message) {
-    final colors = context.colors;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: colors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Text(message),
-      ),
-    );
-  }
-
-  void _showInfo(BuildContext context, String message) {
-    final colors = context.colors;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: colors.bgElevated,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: colors.border, width: .5),
-        ),
-        content: Text(message, style: TextStyle(color: colors.textPrimary)),
-      ),
-    );
-  }
-}
-
-// =====================================================================
-// 🧩 UI Components — كل شي هون واجهة بس، ما في منطق أعمال
-// =====================================================================
-
-class _GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const _GlassAppBar({required this.title, required this.icon});
-  final String title;
-  final IconData icon;
-
-  @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: AppBar(
-          backgroundColor: colors.bgPage.withValues(alpha: .82),
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          surfaceTintColor: Colors.transparent,
-          shape: Border(bottom: BorderSide(color: colors.border, width: .5)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: colors.primary.withValues(alpha: .16),
-                ),
-                child: Icon(icon, size: 18, color: colors.primary),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: colors.textPrimary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GlowFab extends StatefulWidget {
-  const _GlowFab({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  State<_GlowFab> createState() => _GlowFabState();
-}
-
-class _GlowFabState extends State<_GlowFab> {
-  bool _hover = false;
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _pressed ? 0.96 : (_hover ? 1.03 : 1.0),
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOut,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(
-                colors: [
-                  colors.primary.withValues(alpha: _hover ? 1 : .92),
-                  colors.secondary.withValues(alpha: _hover ? .9 : .8),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.primary.withValues(alpha: _hover ? .35 : .22),
-                  blurRadius: _hover ? 22 : 14,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Iconsax.add, size: 18, color: Colors.black87),
-                const SizedBox(width: 8),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AnimatedRow extends StatelessWidget {
-  const _AnimatedRow({
-    required this.controller,
-    required this.index,
-    required this.total,
-    required this.child,
-  });
-  final AnimationController controller;
-  final int index;
-  final int total;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final clampedTotal = total.clamp(1, 12);
-    final start = (index / clampedTotal) * 0.5;
-    final end = (start + 0.5).clamp(0.0, 1.0);
-    final anim = CurvedAnimation(
-      parent: controller,
-      curve: Interval(start, end, curve: Curves.easeOutCubic),
-    );
-    return FadeTransition(
-      opacity: anim,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.06),
-          end: Offset.zero,
-        ).animate(anim),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _CashTile extends StatefulWidget {
-  const _CashTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    this.trailingValue,
-    this.trailingValueColor,
-    this.trailingWidget,
-    this.menu,
-    this.onTap,
-    this.dense = false,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final String? trailingValue;
-  final Color? trailingValueColor;
-  final Widget? trailingWidget;
-  final Widget? menu;
-  final VoidCallback? onTap;
-  final bool dense;
-
-  @override
-  State<_CashTile> createState() => _CashTileState();
-}
-
-class _CashTileState extends State<_CashTile> {
-  bool _hover = false;
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final tappable = widget.onTap != null;
-
-    return MouseRegion(
-      onEnter: tappable ? (_) => setState(() => _hover = true) : null,
-      onExit: tappable ? (_) => setState(() => _hover = false) : null,
-      cursor: tappable ? SystemMouseCursors.click : MouseCursor.defer,
-      child: GestureDetector(
-        onTapDown: tappable ? (_) => setState(() => _pressed = true) : null,
-        onTapCancel: tappable ? () => setState(() => _pressed = false) : null,
-        onTapUp: tappable ? (_) => setState(() => _pressed = false) : null,
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _pressed ? 0.99 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: widget.dense ? 10 : 14,
-            ),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: colors.bgElevated,
-              border: Border.all(
-                color:
-                    _hover
-                        ? widget.iconColor.withValues(alpha: .4)
-                        : colors.border,
-                width: .5,
-              ),
-              boxShadow:
-                  _hover
-                      ? [
-                        BoxShadow(
-                          color: widget.iconColor.withValues(alpha: .12),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ]
-                      : [],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: EdgeInsets.all(widget.dense ? 8 : 10),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: widget.iconColor.withValues(
-                      alpha: _hover ? .22 : .14,
-                    ),
-                  ),
-                  child: Icon(
-                    widget.icon,
-                    color: widget.iconColor,
-                    size: widget.dense ? 16 : 20,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
-                          fontSize: widget.dense ? 14 : 15,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        widget.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colors.textSecondary,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (widget.trailingWidget != null)
-                  widget.trailingWidget!
-                else if (widget.trailingValue != null)
-                  Text(
-                    widget.trailingValue!,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: widget.trailingValueColor ?? colors.textPrimary,
-                    ),
-                  ),
-                if (widget.menu != null) widget.menu!,
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.label, required this.color});
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .14),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: .4), width: .5),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w700,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 40,
-            color: colors.textSecondary.withValues(alpha: .5),
-          ),
-          const SizedBox(height: 12),
-          Text(label, style: TextStyle(color: colors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _ThemedDialog extends StatelessWidget {
-  const _ThemedDialog({
-    required this.title,
-    required this.content,
-    required this.confirmLabel,
-    required this.onCancel,
-    required this.onConfirm,
-  });
-  final String title;
-  final Widget content;
-  final String confirmLabel;
-  final VoidCallback onCancel;
-  final VoidCallback onConfirm;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AlertDialog(
-      backgroundColor: colors.bgElevated,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: colors.border, width: .5),
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontWeight: FontWeight.w800,
-          color: colors.textPrimary,
-        ),
-      ),
-      content: SizedBox(width: 420, child: content),
-      actions: [
-        TextButton(
-          onPressed: onCancel,
-          child: Text('إلغاء', style: TextStyle(color: colors.textSecondary)),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: colors.primary,
-            foregroundColor: Colors.black87,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          onPressed: onConfirm,
-          child: Text(confirmLabel),
-        ),
-      ],
-    );
-  }
-}
-
-class _ThemedField extends StatelessWidget {
-  const _ThemedField({
-    required this.controller,
-    required this.label,
-    this.keyboardType,
-  });
-  final TextEditingController controller;
-  final String label;
-  final TextInputType? keyboardType;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      style: TextStyle(color: colors.textPrimary),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: colors.textSecondary),
-        filled: true,
-        fillColor: colors.bgPage,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colors.border, width: .5),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colors.border, width: .5),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colors.primary, width: 1),
-        ),
-      ),
-    );
-  }
-}
-
-class _ThemedDropdown<T> extends StatelessWidget {
-  const _ThemedDropdown({
-    required this.value,
-    required this.label,
-    required this.items,
-    required this.onChanged,
-  });
-  final T value;
-  final String label;
-  final Map<T, String> items;
-  final ValueChanged<T?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return DropdownButtonFormField<T>(
-      value: value,
-      dropdownColor: colors.bgElevated,
-      style: TextStyle(color: colors.textPrimary),
-      items:
-          items.entries
-              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-              .toList(),
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: colors.textSecondary),
-        filled: true,
-        fillColor: colors.bgPage,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colors.border, width: .5),
-        ),
-      ),
-    );
   }
 }
