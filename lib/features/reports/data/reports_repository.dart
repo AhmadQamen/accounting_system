@@ -133,4 +133,85 @@ WHERE entity_id=? AND occurred_at>=? AND occurred_at<?
 ''', [ctx.entityId, from.toUtc().toIso8601String(), to.toUtc().toIso8601String()]);
     return rows.first;
   }
+
+
+  Future<Map<String, List<int>>> dashboardTrends({int days = 7}) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final today = DateTime.now().toUtc();
+    final start = DateTime.utc(today.year, today.month, today.day).subtract(Duration(days: days - 1));
+    final fromText = start.toIso8601String();
+
+    Future<Map<String, int>> grouped(String table) async {
+      final rows = await db.rawQuery('''
+SELECT substr(occurred_at, 1, 10) day, COALESCE(SUM(final_minor),0) total
+FROM $table
+WHERE entity_id=? AND status='posted' AND occurred_at>=?
+GROUP BY substr(occurred_at, 1, 10)
+ORDER BY day
+''', [ctx.entityId, fromText]);
+      return {
+        for (final row in rows)
+          '${row['day']}': ((row['total'] as num?) ?? 0).toInt(),
+      };
+    }
+
+    final sales = await grouped('sales');
+    final purchases = await grouped('purchase_invoices');
+    final salesValues = <int>[];
+    final purchaseValues = <int>[];
+    for (var i = 0; i < days; i++) {
+      final day = start.add(Duration(days: i)).toIso8601String().substring(0, 10);
+      salesValues.add(sales[day] ?? 0);
+      purchaseValues.add(purchases[day] ?? 0);
+    }
+    return {'sales': salesValues, 'purchases': purchaseValues};
+  }
+
+  Future<List<Map<String, Object?>>> recentActivity({int limit = 7}) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    return db.rawQuery('''
+SELECT * FROM (
+  SELECT 'sale' kind, s.id id, s.invoice_number display_number,
+         s.final_minor amount_minor, s.occurred_at occurred_at,
+         p.name party_name
+  FROM sales s
+  LEFT JOIN parties p ON p.id=s.party_id
+  WHERE s.entity_id=? AND s.status='posted' AND s.deleted_at IS NULL
+  UNION ALL
+  SELECT 'purchase' kind, x.id id, x.invoice_number display_number,
+         x.final_minor amount_minor, x.occurred_at occurred_at,
+         p.name party_name
+  FROM purchase_invoices x
+  LEFT JOIN parties p ON p.id=x.party_id
+  WHERE x.entity_id=? AND x.status='posted' AND x.deleted_at IS NULL
+  UNION ALL
+  SELECT 'expense' kind, e.id id, e.expense_number display_number,
+         e.amount_minor amount_minor, e.occurred_at occurred_at,
+         NULL party_name
+  FROM expenses e
+  WHERE e.entity_id=? AND e.status='posted' AND e.deleted_at IS NULL
+)
+ORDER BY occurred_at DESC
+LIMIT ?
+''', [ctx.entityId, ctx.entityId, ctx.entityId, limit]);
+  }
+
+  Future<List<Map<String, Object?>>> lowStockItems({int limit = 5}) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    return db.rawQuery('''
+SELECT p.id product_id, p.name product_name, w.name warehouse_name,
+       i.current_quantity, p.min_quantity
+FROM inventory_items i
+JOIN products p ON p.id=i.product_id
+JOIN warehouses w ON w.id=i.warehouse_id
+WHERE i.entity_id=? AND p.deleted_at IS NULL AND w.deleted_at IS NULL
+  AND p.min_quantity>0 AND i.current_quantity<=p.min_quantity
+ORDER BY (i.current_quantity / CASE WHEN p.min_quantity=0 THEN 1 ELSE p.min_quantity END) ASC,
+         p.name COLLATE NOCASE
+LIMIT ?
+''', [ctx.entityId, limit]);
+  }
 }

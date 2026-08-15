@@ -1,8 +1,11 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/documents/data/document_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:iconsax/iconsax.dart';
 
 enum DocumentKind { sale, purchase, saleReturn, purchaseReturn, waste }
 
@@ -92,209 +95,275 @@ class _NewDocumentScreenState extends ConsumerState<NewDocumentScreen> {
     final subtotal = _lines.fold<int>(0, (sum, line) => sum + line.lineTotalMinor);
     final discount = _safeMoney(_documentDiscount.text);
     final finalMinor = (subtotal - discount).clamp(0, subtotal).toInt();
+    final colors = context.colors;
+    final icon = switch (widget.kind) {
+      DocumentKind.sale => Iconsax.receipt_add,
+      DocumentKind.purchase => Iconsax.shopping_cart,
+      DocumentKind.waste => Iconsax.warning_2,
+      _ => Icons.description_outlined,
+    };
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(title: Text('مستند ${widget.kind.label} جديد')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1050),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        SizedBox(
-                          width: 260,
-                          child: DropdownButtonFormField<String>(
-                            value: _warehouseId,
-                            items: data.warehouses
-                                .map((row) => DropdownMenuItem(
-                                      value: row['id'] as String,
-                                      child: Text('${row['name']}'),
-                                    ))
-                                .toList(),
-                            onChanged: _lines.isNotEmpty
-                                ? null
-                                : (value) => setState(() => _warehouseId = value),
-                            decoration: const InputDecoration(labelText: 'المستودع'),
-                          ),
-                        ),
-                        if (!_isWaste)
-                          SizedBox(
-                            width: 260,
-                            child: DropdownButtonFormField<String?>(
-                              value: _partyId,
-                              items: [
-                                if (!_isPurchase)
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('بدون عميل (بيع نقدي)'),
-                                  ),
-                                ...data.parties.map((row) => DropdownMenuItem<String?>(
-                                      value: row['id'] as String,
-                                      child: Text('${row['name']}'),
-                                    )),
-                              ],
-                              onChanged: (value) => setState(() => _partyId = value),
-                              decoration: InputDecoration(labelText: _isPurchase ? 'المورد' : 'العميل'),
-                            ),
-                          ),
-                        if (!_isWaste)
-                          SizedBox(
-                            width: 220,
-                            child: DropdownButtonFormField<String>(
-                              value: _cashboxId,
-                              items: data.cashboxes
-                                  .map((row) => DropdownMenuItem(
-                                        value: row['id'] as String,
-                                        child: Text('${row['name']}'),
-                                      ))
-                                  .toList(),
-                              onChanged: (value) => setState(() => _cashboxId = value),
-                              decoration: const InputDecoration(labelText: 'الصندوق'),
-                            ),
-                          ),
-                      ],
+      body: PremiumBackdrop(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 36),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1180),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AnimatedEntrance(
+                    child: PageIntro(
+                      eyebrow: 'NEW DOCUMENT',
+                      title: 'مستند ${widget.kind.label} جديد',
+                      subtitle: _isWaste
+                          ? 'سجّل الهالك بدقة ليُخصم من المخزون مع حفظ أثر الحركة.'
+                          : _isPurchase
+                              ? 'أدخل المورد والبنود والدفع، ثم احفظ كمسودة أو اعتمد المستند.'
+                              : 'واجهة سريعة للبيع؛ أضف البنود وحدد المقبوض ثم اعتمد الفاتورة.',
+                      icon: icon,
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            Text('البنود', style: Theme.of(context).textTheme.titleLarge),
-                            const Spacer(),
-                            FilledButton.icon(
-                              onPressed: () => _addLine(context),
-                              icon: const Icon(Icons.add),
-                              label: const Text('إضافة بند'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (_lines.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 28),
-                            child: Center(child: Text('لا توجد بنود بعد')),
-                          )
-                        else
-                          ..._lines.indexed.map((entry) {
-                            final index = entry.$1;
-                            final line = entry.$2;
-                            return ListTile(
-                              leading: CircleAvatar(child: Text('${index + 1}')),
-                              title: Text(line.productName),
-                              subtitle: Text(
-                                '${line.quantity} ${line.unitName} × ${Money(line.unitPriceMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}'
-                                '${line.lineDiscountMinor > 0 ? ' • خصم سطر ${Money(line.lineDiscountMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}' : ''}',
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    Money(line.lineTotalMinor).format(
-                                      locale: Localizations.localeOf(context).toString(),
-                                      currencyCode: currency,
-                                    ),
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'حذف البند',
-                                    onPressed: () => setState(() => _lines.removeAt(index)),
-                                    icon: const Icon(Icons.delete_outline),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (!_isWaste)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                  const SizedBox(height: 20),
+                  AnimatedEntrance(
+                    delay: const Duration(milliseconds: 60),
+                    child: PremiumPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          SizedBox(
-                            width: 220,
-                            child: TextField(
-                              controller: _documentDiscount,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              onChanged: (_) => setState(() {}),
-                              decoration: const InputDecoration(labelText: 'خصم الفاتورة'),
-                            ),
+                          const SectionHeader(
+                            title: 'بيانات المستند',
+                            subtitle: 'المستودع والطرف والصندوق المرتبط بالحركة',
                           ),
-                          SizedBox(
-                            width: 220,
-                            child: TextField(
-                              controller: _paid,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(labelText: _isPurchase ? 'المدفوع للمورد' : 'المقبوض'),
-                            ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              SizedBox(
+                                width: 270,
+                                child: DropdownButtonFormField<String>(
+                                  value: _warehouseId,
+                                  items: data.warehouses
+                                      .map((row) => DropdownMenuItem(
+                                            value: row['id'] as String,
+                                            child: Text('${row['name']}'),
+                                          ))
+                                      .toList(),
+                                  onChanged: _lines.isNotEmpty
+                                      ? null
+                                      : (value) => setState(() => _warehouseId = value),
+                                  decoration: const InputDecoration(
+                                    labelText: 'المستودع',
+                                    prefixIcon: Icon(Iconsax.buildings_2),
+                                  ),
+                                ),
+                              ),
+                              if (!_isWaste)
+                                SizedBox(
+                                  width: 270,
+                                  child: DropdownButtonFormField<String?>(
+                                    value: _partyId,
+                                    items: [
+                                      if (!_isPurchase)
+                                        const DropdownMenuItem<String?>(
+                                          value: null,
+                                          child: Text('بدون عميل (بيع نقدي)'),
+                                        ),
+                                      ...data.parties.map((row) => DropdownMenuItem<String?>(
+                                            value: row['id'] as String,
+                                            child: Text('${row['name']}'),
+                                          )),
+                                    ],
+                                    onChanged: (value) => setState(() => _partyId = value),
+                                    decoration: InputDecoration(
+                                      labelText: _isPurchase ? 'المورد' : 'العميل',
+                                      prefixIcon: Icon(_isPurchase ? Iconsax.truck_fast : Icons.person_outline_rounded),
+                                    ),
+                                  ),
+                                ),
+                              if (!_isWaste)
+                                SizedBox(
+                                  width: 230,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _cashboxId,
+                                    items: data.cashboxes
+                                        .map((row) => DropdownMenuItem(
+                                              value: row['id'] as String,
+                                              child: Text('${row['name']}'),
+                                            ))
+                                        .toList(),
+                                    onChanged: (value) => setState(() => _cashboxId = value),
+                                    decoration: const InputDecoration(
+                                      labelText: 'الصندوق',
+                                      prefixIcon: Icon(Iconsax.wallet_3),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                          _totalChip(context, 'المجموع', subtotal, currency),
-                          _totalChip(context, 'الصافي', finalMinor, currency),
                         ],
                       ),
                     ),
                   ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _note,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(labelText: 'ملاحظات'),
-                ),
-                const SizedBox(height: 18),
-                if (_isWaste)
-                  FilledButton.icon(
-                    onPressed: _saving ? null : () => _save(post: true),
-                    icon: _saving
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.check),
-                    label: const Text('اعتماد الهالك'),
-                  )
-                else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _saving ? null : () => _save(post: false),
-                          icon: const Icon(Icons.save_outlined),
-                          label: const Text('حفظ مسودة'),
-                        ),
+                  const SizedBox(height: 14),
+                  AnimatedEntrance(
+                    delay: const Duration(milliseconds: 110),
+                    child: PremiumPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SectionHeader(
+                            title: 'البنود',
+                            subtitle: _lines.isEmpty ? 'أضف أول بند للمستند' : '${_lines.length} بند مضاف',
+                            trailing: FilledButton.icon(
+                              onPressed: () => _addLine(context),
+                              icon: const Icon(Icons.add_rounded, size: 17),
+                              label: const Text('إضافة بند'),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          AnimatedSize(
+                            duration: AppMotion.normal,
+                            curve: AppMotion.curve,
+                            alignment: Alignment.topCenter,
+                            child: _lines.isEmpty
+                                ? const EmptyState(
+                                    title: 'لا توجد بنود بعد',
+                                    subtitle: 'اضغط “إضافة بند” لاختيار المنتج والكمية والسعر.',
+                                    icon: Icons.inventory_2_outlined,
+                                  )
+                                : Column(
+                                    children: [
+                                      for (var index = 0; index < _lines.length; index++) ...[
+                                        _InvoiceLineRow(
+                                          index: index,
+                                          line: _lines[index],
+                                          currency: currency,
+                                          onDelete: () => setState(() => _lines.removeAt(index)),
+                                        ),
+                                        if (index != _lines.length - 1)
+                                          Divider(height: 1, color: colors.border),
+                                      ],
+                                    ],
+                                  ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _saving ? null : () => _save(post: true),
-                          icon: _saving
-                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.check),
-                          label: const Text('حفظ واعتماد'),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-              ],
+                  const SizedBox(height: 14),
+                  if (!_isWaste)
+                    AnimatedEntrance(
+                      delay: const Duration(milliseconds: 160),
+                      child: PremiumPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SectionHeader(
+                              title: 'التسوية المالية',
+                              subtitle: 'الخصم والدفع والقيمة النهائية للمستند',
+                            ),
+                            const SizedBox(height: 14),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 220,
+                                  child: TextField(
+                                    controller: _documentDiscount,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    onChanged: (_) => setState(() {}),
+                                    decoration: const InputDecoration(
+                                      labelText: 'خصم الفاتورة',
+                                      prefixIcon: Icon(Icons.discount_outlined),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 220,
+                                  child: TextField(
+                                    controller: _paid,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: InputDecoration(
+                                      labelText: _isPurchase ? 'المدفوع للمورد' : 'المقبوض',
+                                      prefixIcon: const Icon(Icons.payments_outlined),
+                                    ),
+                                  ),
+                                ),
+                                _totalChip(context, 'المجموع', subtotal, currency),
+                                _totalChip(context, 'الصافي', finalMinor, currency, emphasized: true),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (!_isWaste) const SizedBox(height: 14),
+                  AnimatedEntrance(
+                    delay: const Duration(milliseconds: 200),
+                    child: PremiumPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SectionHeader(title: 'ملاحظات', subtitle: 'اختياري — تحفظ مع المستند'),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _note,
+                            minLines: 2,
+                            maxLines: 4,
+                            decoration: const InputDecoration(
+                              hintText: 'أضف أي ملاحظة مهمة هنا…',
+                              prefixIcon: Icon(Icons.notes_outlined),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  AnimatedEntrance(
+                    delay: const Duration(milliseconds: 240),
+                    child: PremiumPanel(
+                      accent: colors.primary,
+                      child: _isWaste
+                          ? FilledButton.icon(
+                              onPressed: _saving ? null : () => _save(post: true),
+                              icon: _saving
+                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Iconsax.tick_circle),
+                              label: const Text('اعتماد الهالك'),
+                            )
+                          : Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _saving ? null : () => _save(post: false),
+                                    icon: const Icon(Icons.save_outlined),
+                                    label: const Text('حفظ مسودة'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: _saving ? null : () => _save(post: true),
+                                    icon: _saving
+                                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Iconsax.tick_circle),
+                                    label: const Text('حفظ واعتماد'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -302,11 +371,34 @@ class _NewDocumentScreenState extends ConsumerState<NewDocumentScreen> {
     );
   }
 
-  Widget _totalChip(BuildContext context, String label, int value, String currency) {
-    return Chip(
-      label: Text(
-        '$label: ${Money(value).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
-        style: const TextStyle(fontWeight: FontWeight.bold),
+  Widget _totalChip(BuildContext context, String label, int value, String currency, {bool emphasized = false}) {
+    final colors = context.colors;
+    final accent = emphasized ? colors.primary : colors.secondary;
+    return AnimatedContainer(
+      duration: AppMotion.normal,
+      width: 210,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: emphasized ? .12 : .08),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: accent.withValues(alpha: .18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(color: colors.textSecondary, fontSize: 10.5, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(
+            Money(value).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: emphasized ? colors.primary : colors.textPrimary,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -577,6 +669,71 @@ class _DraftLine {
   final int lineDiscountMinor;
 
   int get lineTotalMinor => Money.multiplyByQuantity(unitPriceMinor, quantity) - lineDiscountMinor;
+}
+
+
+class _InvoiceLineRow extends StatelessWidget {
+  const _InvoiceLineRow({
+    required this.index,
+    required this.line,
+    required this.currency,
+    required this.onDelete,
+  });
+
+  final int index;
+  final _DraftLine line;
+  final String currency;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: colors.primary.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Text('${index + 1}', style: TextStyle(color: colors.primary, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(line.productName, style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 3),
+                Text(
+                  '${line.quantity} ${line.unitName} × ${Money(line.unitPriceMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}'
+                  '${line.lineDiscountMinor > 0 ? ' • خصم ${Money(line.lineDiscountMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}' : ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textDim, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            Money(line.lineTotalMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
+            style: TextStyle(color: colors.textPrimary, fontSize: 12, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            tooltip: 'حذف البند',
+            onPressed: onDelete,
+            icon: Icon(Icons.delete_outline_rounded, color: colors.error, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EditorData {

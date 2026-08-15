@@ -37,9 +37,6 @@ class AppDatabase {
       dbPath,
       options: OpenDatabaseOptions(
         version: dbVersion,
-        onConfigure: (db) async {
-          await db.execute('PRAGMA foreign_keys = ON');
-        },
         onCreate: createSchema,
         onUpgrade: migrate,
       ),

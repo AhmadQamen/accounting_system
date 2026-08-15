@@ -13,44 +13,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/providers/app_providers.dart';
 
-class AccountingSystem extends ConsumerWidget {
-  static final GlobalKey<NavigatorState> navigatorKey =
-      GlobalKey<NavigatorState>();
-  const AccountingSystem({super.key});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final init = ref.watch(appInitializerProvider);
-    final settings = ref.watch(settingsControllerProvider);
-    final home = init.when(
-      loading: () => const ModernSplashScreen(),
-      error: (e, s) => ErrorPage(
-        error: e,
-        stack: s,
-        onRestart: () => ref.invalidate(appInitializerProvider),
-      ),
-      data: (_) => ref.watch(authNotifierProvider).isAuthenticated
-          ? const AppShell()
-          : const LoginScreen(),
-    );
-    return _app(settings, home);
-  }
-
-  Widget _app(AppSettings settings, Widget home) => MaterialApp(
-    navigatorKey: navigatorKey,
-    debugShowCheckedModeBanner: false,
-    title: 'Accounting System',
-    locale: Locale(settings.language),
-    supportedLocales: AppLocalizations.supportedLocales,
-    localizationsDelegates: const [
-      AppLocalizations.delegate,
-      GlobalMaterialLocalizations.delegate,
-      GlobalWidgetsLocalizations.delegate,
-      GlobalCupertinoLocalizations.delegate,
-    ],
-    themeMode: settings.themeMode,
-    theme: AppTheme.light,
-    darkTheme: AppTheme.dark,
-    scrollBehavior: NoScrollGlowBehavior(),
-    home: home,
-  );
+class AccountingSystem extends ConsumerWidget{
+ static final GlobalKey<NavigatorState> navigatorKey=GlobalKey<NavigatorState>();
+ const AccountingSystem({super.key});
+ @override Widget build(BuildContext context,WidgetRef ref){final init=ref.watch(appInitializerProvider);final settings=ref.watch(settingsControllerProvider);final home=init.when(loading:()=>const ModernSplashScreen(),error:(e,s)=>ErrorPage(error:e,stack:s,onRestart:()=>ref.invalidate(appInitializerProvider)),data:(_)=>ref.watch(authNotifierProvider).isAuthenticated?const AppShell():const LoginScreen());return _app(settings,home);}
+ Widget _app(AppSettings settings,Widget home)=>MaterialApp(navigatorKey:navigatorKey,debugShowCheckedModeBanner:false,title:'نظام المحاسبة',locale:Locale(settings.language),supportedLocales:AppLocalizations.supportedLocales,localizationsDelegates:const [AppLocalizations.delegate,GlobalMaterialLocalizations.delegate,GlobalWidgetsLocalizations.delegate,GlobalCupertinoLocalizations.delegate],themeMode:settings.themeMode,theme:AppTheme.light,darkTheme:AppTheme.dark,scrollBehavior:NoScrollGlowBehavior(),home:home);
 }

@@ -42,8 +42,13 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
   final Color textSecondary;
   final Color textDim;
 
+
   Color get primary => purple;
   Color get secondary => amber;
+  Color get primaryTint => purpleTint;
+  Color get primaryDim => purpleDim;
+  Color get secondaryTint => amberTint;
+  Color get secondaryDim => amberDim;
   Color get surface => bgPage;
   Color get surfaceElevated => bgElevated;
   Color get warning => amber;

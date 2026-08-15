@@ -2,14 +2,11 @@ import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/app_logo_icon.dart';
 import 'package:flutter/material.dart';
 
-/// Top section of the desktop sidebar: logo + app name + subtitle.
-///
-/// Fixed height (~96px), never scrolls — sits above the navigation list.
 class SidebarHeader extends StatelessWidget {
   const SidebarHeader({
     super.key,
-    this.appName = 'Accounting System',
-    this.subtitle = 'Offline Accounting',
+    this.appName = 'نظام المحاسبة',
+    this.subtitle = 'إدارة مالية • Offline‑First',
   });
 
   final String appName;
@@ -18,56 +15,65 @@ class SidebarHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-
     return Container(
-      height: 96,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      alignment: Alignment.centerLeft,
+      height: 106,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 50,
+            height: 50,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: colors.bgElevated,
-              border: Border.all(color: colors.border, width: 1),
+              borderRadius: BorderRadius.circular(17),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [colors.primary, colors.secondary],
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: colors.purple.withValues(alpha: 0.18),
-                  blurRadius: 16,
-                  spreadRadius: 1,
+                  color: colors.primary.withValues(alpha: .20),
+                  blurRadius: 22,
+                  spreadRadius: -7,
+                  offset: const Offset(0, 10),
                 ),
               ],
             ),
-            child: const AppLogoIcon(width: 30, height: 30, colored: true),
+            child: Container(
+              margin: const EdgeInsets.all(1),
+              decoration: BoxDecoration(
+                color: colors.bgElevated.withValues(alpha: .88),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Center(child: AppLogoIcon(width: 30, height: 30, colored: true)),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   appName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
                     color: colors.textPrimary,
-                    letterSpacing: -0.3,
+                    letterSpacing: -.35,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: colors.textSecondary,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textDim,
                   ),
                 ),
               ],
