@@ -39,11 +39,8 @@ class AppDatabase {
     final dbPath = await getPath;
     return databaseFactory.openDatabase(
       dbPath,
-      options: OpenDatabaseOptions(
+   options: OpenDatabaseOptions(
         version: dbVersion,
-        onConfigure: (db) async {
-          await db.execute('PRAGMA foreign_keys = ON');
-        },
         onCreate: createSchema,
         onUpgrade: migrate,
       ),
@@ -71,34 +68,19 @@ class AppDatabase {
     }
     if (oldVersion < 4) {
       await createSchema(db, newVersion);
-      await _ensureColumn(
-        db,
-        'purchase_items',
-        'cost_amount_minor',
-        'INTEGER NOT NULL DEFAULT 0',
-      );
+      await _ensureColumn(db, 'purchase_items', 'cost_amount_minor', 'INTEGER NOT NULL DEFAULT 0');
     }
     if (oldVersion < 5) {
       await createSchema(db, newVersion);
-      await _ensureColumn(
-        db,
-        'sale_items',
-        'net_amount_minor',
-        'INTEGER NOT NULL DEFAULT 0',
-      );
+      await _ensureColumn(db, 'sale_items', 'net_amount_minor', 'INTEGER NOT NULL DEFAULT 0');
     }
   }
 
-  Future<void> _ensureColumn(
-    DatabaseExecutor db,
-    String table,
-    String column,
-    String definition,
-  ) async {
+
+  Future<void> _ensureColumn(DatabaseExecutor db, String table, String column, String definition) async {
     final columns = await db.rawQuery('PRAGMA table_info($table)');
     final exists = columns.any((row) => row['name'] == column);
-    if (!exists)
-      await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+    if (!exists) await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
   }
 
   Future<T> transaction<T>(Future<T> Function(Transaction txn) action) async {

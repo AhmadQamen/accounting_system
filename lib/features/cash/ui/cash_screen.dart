@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
@@ -11,27 +13,92 @@ import 'package:iconsax/iconsax.dart';
 
 enum CashScreenMode { cashboxes, expenses, transfers, sessions }
 
-class CashScreen extends ConsumerWidget {
+class CashScreen extends ConsumerStatefulWidget {
   const CashScreen({super.key, required this.mode});
   final CashScreenMode mode;
 
+  @override
+  ConsumerState<CashScreen> createState() => _CashScreenState();
+}
+
+class _CashScreenState extends ConsumerState<CashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entrance;
+  late Future<List<Map<String, Object?>>> _future;
+
+  CashScreenMode get mode => widget.mode;
+
   String get title => switch (mode) {
-        CashScreenMode.cashboxes => 'الصناديق',
-        CashScreenMode.expenses => 'المصروفات',
-        CashScreenMode.transfers => 'تحويلات الصندوق',
-        CashScreenMode.sessions => 'جلسات الصندوق',
-      };
+    CashScreenMode.cashboxes => 'الصناديق',
+    CashScreenMode.expenses => 'المصروفات',
+    CashScreenMode.transfers => 'تحويلات الصندوق',
+    CashScreenMode.sessions => 'جلسات الصندوق',
+  };
+
+  IconData get modeIcon => switch (mode) {
+    CashScreenMode.cashboxes => Iconsax.wallet_money,
+    CashScreenMode.expenses => Iconsax.money_send,
+    CashScreenMode.transfers => Iconsax.arrow_swap_horizontal,
+    CashScreenMode.sessions => Iconsax.timer_1,
+  };
+
+  String get fabLabel => switch (mode) {
+    CashScreenMode.cashboxes => 'صندوق جديد',
+    CashScreenMode.expenses => 'مصروف جديد',
+    CashScreenMode.transfers => 'تحويل جديد',
+    CashScreenMode.sessions => 'فتح جلسة',
+  };
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    _entrance = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..forward();
+    _future = _load(ref);
+  }
+
+  @override
+  void dispose() {
+    _entrance.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    setState(() => _future = _load(ref));
+    _entrance
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.watch(dataRevisionProvider);
-    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final currency =
+        ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
     final compact = showCompactPageAppBar(context);
     final (icon, accent, subtitle) = switch (mode) {
-      CashScreenMode.cashboxes => (Iconsax.wallet_money, context.colors.primary, 'أرصدة الصناديق وسجل الحركة والتسويات.'),
-      CashScreenMode.expenses => (Iconsax.money_send, context.colors.error, 'مصروفات معتمدة مرتبطة بالصندوق مباشرة.'),
-      CashScreenMode.transfers => (Iconsax.convert_card, context.colors.info, 'تحويلات داخلية موثقة بين الصناديق.'),
-      CashScreenMode.sessions => (Iconsax.clock, context.colors.secondary, 'فتح وإغلاق جلسات الصندوق ومطابقة النقد.'),
+      CashScreenMode.cashboxes => (
+        Iconsax.wallet_money,
+        context.colors.primary,
+        'أرصدة الصناديق وسجل الحركة والتسويات.',
+      ),
+      CashScreenMode.expenses => (
+        Iconsax.money_send,
+        context.colors.error,
+        'مصروفات معتمدة مرتبطة بالصندوق مباشرة.',
+      ),
+      CashScreenMode.transfers => (
+        Iconsax.convert_card,
+        context.colors.info,
+        'تحويلات داخلية موثقة بين الصناديق.',
+      ),
+      CashScreenMode.sessions => (
+        Iconsax.clock,
+        context.colors.secondary,
+        'فتح وإغلاق جلسات الصندوق ومطابقة النقد.',
+      ),
     };
 
     return MyScaffold(
@@ -65,21 +132,45 @@ class CashScreen extends ConsumerWidget {
               future: _load(ref),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
-                  return const SizedBox(height: 360, child: Center(child: CircularProgressIndicator()));
+                  return const SizedBox(
+                    height: 360,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
                 }
                 if (snapshot.hasError) {
-                  return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل البيانات', subtitle: '${snapshot.error}');
+                  return EmptyState(
+                    icon: Iconsax.warning_2,
+                    title: 'تعذر تحميل البيانات',
+                    subtitle: '${snapshot.error}',
+                  );
                 }
                 final rows = snapshot.data ?? const <CashListItem>[];
                 final total = switch (mode) {
-                  CashScreenMode.cashboxes => rows.whereType<Cashbox>().fold<int>(0, (sum, row) => sum + row.currentBalanceMinor),
-                  CashScreenMode.expenses => rows.whereType<Expense>().fold<int>(0, (sum, row) => sum + row.amountMinor),
-                  CashScreenMode.transfers => rows.whereType<CashTransfer>().fold<int>(0, (sum, row) => sum + row.amountMinor),
-                  CashScreenMode.sessions => rows.whereType<CashSession>().where((row) => row.status == 'open').length,
+                  CashScreenMode.cashboxes => rows
+                      .whereType<Cashbox>()
+                      .fold<int>(
+                        0,
+                        (sum, row) => sum + row.currentBalanceMinor,
+                      ),
+                  CashScreenMode.expenses => rows
+                      .whereType<Expense>()
+                      .fold<int>(0, (sum, row) => sum + row.amountMinor),
+                  CashScreenMode.transfers => rows
+                      .whereType<CashTransfer>()
+                      .fold<int>(0, (sum, row) => sum + row.amountMinor),
+                  CashScreenMode.sessions =>
+                    rows
+                        .whereType<CashSession>()
+                        .where((row) => row.status == 'open')
+                        .length,
                 };
-                final totalLabel = mode == CashScreenMode.sessions
-                    ? '$total'
-                    : Money(total).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
+                final totalLabel =
+                    mode == CashScreenMode.sessions
+                        ? '$total'
+                        : Money(total).format(
+                          locale: Localizations.localeOf(context).toString(),
+                          currencyCode: currency,
+                        );
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -87,37 +178,48 @@ class CashScreen extends ConsumerWidget {
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final narrow = constraints.maxWidth < 700;
-                        final width = narrow ? constraints.maxWidth : (constraints.maxWidth - 12) / 2;
+                        final width =
+                            narrow
+                                ? constraints.maxWidth
+                                : (constraints.maxWidth - 12) / 2;
                         return Wrap(
                           spacing: 12,
                           runSpacing: 12,
                           children: [
                             SizedBox(
                               width: width,
-                                child: AnimatedEntrance(
+                              child: AnimatedEntrance(
                                 delay: const Duration(milliseconds: 60),
                                 child: MetricCard(
                                   label: switch (mode) {
-                                    CashScreenMode.cashboxes => 'إجمالي السيولة',
-                                    CashScreenMode.expenses => 'إجمالي المصروفات',
-                                    CashScreenMode.transfers => 'قيمة التحويلات',
-                                    CashScreenMode.sessions => 'الجلسات المفتوحة',
+                                    CashScreenMode.cashboxes =>
+                                      'إجمالي السيولة',
+                                    CashScreenMode.expenses =>
+                                      'إجمالي المصروفات',
+                                    CashScreenMode.transfers =>
+                                      'قيمة التحويلات',
+                                    CashScreenMode.sessions =>
+                                      'الجلسات المفتوحة',
                                   },
                                   value: totalLabel,
                                   icon: icon,
                                   accent: accent,
                                   caption: switch (mode) {
-                                    CashScreenMode.cashboxes => 'من دفتر حركات الصندوق',
-                                    CashScreenMode.expenses => '${rows.length} مستند مصروف',
-                                    CashScreenMode.transfers => '${rows.length} تحويل',
-                                    CashScreenMode.sessions => '${rows.length} جلسة في السجل',
+                                    CashScreenMode.cashboxes =>
+                                      'من دفتر حركات الصندوق',
+                                    CashScreenMode.expenses =>
+                                      '${rows.length} مستند مصروف',
+                                    CashScreenMode.transfers =>
+                                      '${rows.length} تحويل',
+                                    CashScreenMode.sessions =>
+                                      '${rows.length} جلسة في السجل',
                                   },
                                 ),
                               ),
                             ),
                             SizedBox(
                               width: width,
-                                child: AnimatedEntrance(
+                              child: AnimatedEntrance(
                                 delay: const Duration(milliseconds: 95),
                                 child: MetricCard(
                                   label: 'عدد السجلات',
@@ -141,24 +243,37 @@ class CashScreen extends ConsumerWidget {
                           children: [
                             SectionHeader(
                               title: 'السجل',
-                              subtitle: rows.isEmpty ? 'لا توجد حركات مسجلة بعد' : 'آخر البيانات أولاً',
-                              trailing: rows.isEmpty ? null : StatusPill(label: '${rows.length} سجل', color: accent, icon: icon),
+                              subtitle:
+                                  rows.isEmpty
+                                      ? 'لا توجد حركات مسجلة بعد'
+                                      : 'آخر البيانات أولاً',
+                              trailing:
+                                  rows.isEmpty
+                                      ? null
+                                      : StatusPill(
+                                        label: '${rows.length} سجل',
+                                        color: accent,
+                                        icon: icon,
+                                      ),
                             ),
                             const SizedBox(height: 12),
                             if (rows.isEmpty)
                               EmptyState(
                                 title: 'لا توجد بيانات بعد',
-                                subtitle: 'استخدم زر الإضافة في الأعلى لإنشاء أول سجل.',
+                                subtitle:
+                                    'استخدم زر الإضافة في الأعلى لإنشاء أول سجل.',
                                 icon: icon,
                               )
                             else
-                              ...rows.indexed.map((entry) => _cashRow(
-                                    context,
-                                    ref,
-                                    entry.$2,
-                                    currency,
-                                    showDivider: entry.$1 != rows.length - 1,
-                                  )),
+                              ...rows.indexed.map(
+                                (entry) => _cashRow(
+                                  context,
+                                  ref,
+                                  entry.$2,
+                                  currency,
+                                  showDivider: entry.$1 != rows.length - 1,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -176,10 +291,18 @@ class CashScreen extends ConsumerWidget {
   Future<List<CashListItem>> _load(WidgetRef ref) async {
     final repo = ref.read(cashRepositoryProvider);
     return switch (mode) {
-      CashScreenMode.cashboxes => List<CashListItem>.from(await repo.listCashboxes()),
-      CashScreenMode.expenses => List<CashListItem>.from(await repo.listExpenses()),
-      CashScreenMode.transfers => List<CashListItem>.from(await repo.listTransfers()),
-      CashScreenMode.sessions => List<CashListItem>.from(await repo.listSessions()),
+      CashScreenMode.cashboxes => List<CashListItem>.from(
+        await repo.listCashboxes(),
+      ),
+      CashScreenMode.expenses => List<CashListItem>.from(
+        await repo.listExpenses(),
+      ),
+      CashScreenMode.transfers => List<CashListItem>.from(
+        await repo.listTransfers(),
+      ),
+      CashScreenMode.sessions => List<CashListItem>.from(
+        await repo.listSessions(),
+      ),
     };
   }
 
@@ -233,24 +356,25 @@ class CashScreen extends ConsumerWidget {
                   await _adjustment(context, ref, id);
                 }
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'opening',
-                  child: ListTile(
-                    leading: Icon(Icons.add_box_outlined),
-                    title: Text('رصيد افتتاحي'),
-                    dense: true,
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'adjust',
-                  child: ListTile(
-                    leading: Icon(Icons.tune_rounded),
-                    title: Text('تسوية الصندوق'),
-                    dense: true,
-                  ),
-                ),
-              ],
+              itemBuilder:
+                  (_) => const [
+                    PopupMenuItem(
+                      value: 'opening',
+                      child: ListTile(
+                        leading: Icon(Icons.add_box_outlined),
+                        title: Text('رصيد افتتاحي'),
+                        dense: true,
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'adjust',
+                      child: ListTile(
+                        leading: Icon(Icons.tune_rounded),
+                        title: Text('تسوية الصندوق'),
+                        dense: true,
+                      ),
+                    ),
+                  ],
             ),
           ],
         );
@@ -263,7 +387,8 @@ class CashScreen extends ConsumerWidget {
         icon = Iconsax.money_send;
         accent = colors.error;
         titleText = expense.expenseNumber;
-        subtitleText = '${expense.cashboxName ?? 'صندوق'} • ${_prettyDate(expense.occurredAt)}';
+        subtitleText =
+            '${expense.cashboxName ?? 'صندوق'} • ${_prettyDate(expense.occurredAt)}';
         trailing = Text(
           Money(expense.amountMinor).format(
             locale: Localizations.localeOf(context).toString(),
@@ -281,7 +406,8 @@ class CashScreen extends ConsumerWidget {
         icon = Iconsax.convert_card;
         accent = colors.info;
         titleText = transfer.transferNumber;
-        subtitleText = '${transfer.fromCashboxName ?? 'صندوق'} ← ${transfer.toCashboxName ?? 'صندوق'} • ${_prettyDate(transfer.occurredAt)}';
+        subtitleText =
+            '${transfer.fromCashboxName ?? 'صندوق'} ← ${transfer.toCashboxName ?? 'صندوق'} • ${_prettyDate(transfer.occurredAt)}';
         trailing = Text(
           Money(transfer.amountMinor).format(
             locale: Localizations.localeOf(context).toString(),
@@ -300,22 +426,24 @@ class CashScreen extends ConsumerWidget {
         icon = open ? Icons.lock_open_rounded : Icons.lock_outline_rounded;
         accent = open ? colors.success : colors.textSecondary;
         titleText = session.cashboxName ?? 'صندوق';
-        subtitleText = '${open ? 'جلسة مفتوحة' : 'جلسة مغلقة'} • ${_prettyDate(session.openedAt)}';
-        trailing = open
-            ? StatusPill(
-                label: 'مفتوحة',
-                color: colors.success,
-                icon: Icons.lock_open_rounded,
-                compact: true,
-              )
-            : Text(
-                'فرق ${Money(session.differenceMinor ?? 0).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
-                style: TextStyle(
-                  color: colors.textSecondary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                ),
-              );
+        subtitleText =
+            '${open ? 'جلسة مفتوحة' : 'جلسة مغلقة'} • ${_prettyDate(session.openedAt)}';
+        trailing =
+            open
+                ? StatusPill(
+                  label: 'مفتوحة',
+                  color: colors.success,
+                  icon: Icons.lock_open_rounded,
+                  compact: true,
+                )
+                : Text(
+                  'فرق ${Money(session.differenceMinor ?? 0).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}',
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                );
         if (open && session.id != null) {
           onTap = () => _closeSession(context, ref, session.id!, currency);
         }
@@ -421,16 +549,20 @@ class CashScreen extends ConsumerWidget {
         final controller = TextEditingController();
         final ok = await showDialog<bool>(
           context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('صندوق جديد'),
-            content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'الاسم')),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('حفظ')),
-            ],
-          ),
+          builder:
+              (dialogContext) => _ThemedDialog(
+                title: 'صندوق جديد',
+                content: _ThemedField(controller: controller, label: 'الاسم'),
+                confirmLabel: 'حفظ',
+                onCancel: () => Navigator.pop(dialogContext, false),
+                onConfirm: () => Navigator.pop(dialogContext, true),
+              ),
         );
-        if (ok == true && controller.text.trim().isNotEmpty) await ref.read(masterDataRepositoryProvider).saveCashbox(name: controller.text);
+        if (ok == true && controller.text.trim().isNotEmpty) {
+          await ref
+              .read(masterDataRepositoryProvider)
+              .saveCashbox(name: controller.text);
+        }
         controller.dispose();
       } else if (boxes.isEmpty) {
         throw StateError('أضف صندوقاً أولاً');
@@ -438,8 +570,23 @@ class CashScreen extends ConsumerWidget {
         var box = boxes.first.id!;
         final amount = TextEditingController();
         final note = TextEditingController();
-        final ok = await _moneyDialog(context, 'مصروف جديد', boxes, (value) => box = value, amount, note);
-        if (ok) await ref.read(cashRepositoryProvider).postExpense(cashboxId: box, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        final ok = await _moneyDialog(
+          context,
+          'مصروف جديد',
+          boxes,
+          (value) => box = value,
+          amount,
+          note,
+        );
+        if (ok) {
+          await ref
+              .read(cashRepositoryProvider)
+              .postExpense(
+                cashboxId: box,
+                amountMinor: Money.fromMajor(amount.text),
+                note: note.text,
+              );
+        }
         amount.dispose();
         note.dispose();
       } else if (mode == CashScreenMode.transfers) {
@@ -448,232 +595,403 @@ class CashScreen extends ConsumerWidget {
       } else {
         var box = boxes.first.id!;
         final amount = TextEditingController(text: '0');
-        final ok = await _moneyDialog(context, 'فتح جلسة صندوق', boxes, (value) => box = value, amount, null);
-        if (ok) await ref.read(cashRepositoryProvider).openSession(cashboxId: box, openingAmountMinor: Money.fromMajor(amount.text));
+        final ok = await _moneyDialog(
+          context,
+          'فتح جلسة صندوق',
+          boxes,
+          (value) => box = value,
+          amount,
+          null,
+        );
+        if (ok) {
+          await ref
+              .read(cashRepositoryProvider)
+              .openSession(
+                cashboxId: box,
+                openingAmountMinor: Money.fromMajor(amount.text),
+              );
+        }
         amount.dispose();
       }
       ref.read(dataRevisionProvider.notifier).state++;
+      if (context.mounted) _reload();
     } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (context.mounted) _showError(context, '$e');
     }
   }
 
-  Future<void> _openingBalance(BuildContext context, WidgetRef ref, String cashboxId) async {
+  Future<void> _openingBalance(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+  ) async {
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('الرصيد الافتتاحي'),
-        content: SizedBox(
-          width: responsiveDialogWidth(context, 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ؛ استخدم قيمة سالبة إن لزم')),
-              const SizedBox(height: 8),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'ملاحظة')),
-            ],
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('الرصيد الافتتاحي'),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: amount,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'المبلغ؛ استخدم قيمة سالبة إن لزم',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: note,
+                    decoration: const InputDecoration(labelText: 'ملاحظة'),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('اعتماد')),
-        ],
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(cashRepositoryProvider).postOpeningBalance(cashboxId: cashboxId, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        await ref
+            .read(cashRepositoryProvider)
+            .postOpeningBalance(
+              cashboxId: cashboxId,
+              amountMinor: Money.fromMajor(amount.text),
+              note: note.text,
+            );
         ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     amount.dispose();
     note.dispose();
   }
 
-  Future<void> _adjustment(BuildContext context, WidgetRef ref, String cashboxId) async {
+  Future<void> _adjustment(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+  ) async {
     var direction = 'in';
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('تسوية الصندوق'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: direction,
-                  items: const [DropdownMenuItem(value: 'in', child: Text('زيادة')), DropdownMenuItem(value: 'out', child: Text('نقص'))],
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => direction = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'الاتجاه'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: const Text('تسوية الصندوق'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: direction,
+                          items: const [
+                            DropdownMenuItem(value: 'in', child: Text('زيادة')),
+                            DropdownMenuItem(value: 'out', child: Text('نقص')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null)
+                              setLocal(() => direction = value);
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'الاتجاه',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-                const SizedBox(height: 8),
-                TextField(controller: note, decoration: const InputDecoration(labelText: 'سبب التسوية')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('اعتماد')),
-          ],
-        ),
-      ),
     );
     if (ok == true && note.text.trim().isNotEmpty) {
       try {
-        await ref.read(cashRepositoryProvider).postAdjustment(cashboxId: cashboxId, direction: direction, amountMinor: Money.fromMajor(amount.text), note: note.text);
+        await ref
+            .read(cashRepositoryProvider)
+            .postAdjustment(
+              cashboxId: cashboxId,
+              direction: direction,
+              amountMinor: Money.fromMajor(amount.text),
+              note: note.text,
+            );
         ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     amount.dispose();
     note.dispose();
   }
 
-  Future<void> _history(BuildContext context, WidgetRef ref, String cashboxId, String currency) async {
-    final rows = await ref.read(cashRepositoryProvider).transactionHistory(cashboxId: cashboxId);
+  Future<void> _history(
+    BuildContext context,
+    WidgetRef ref,
+    String cashboxId,
+    String currency,
+  ) async {
+    final rows = await ref
+        .read(cashRepositoryProvider)
+        .transactionHistory(cashboxId: cashboxId);
     if (!context.mounted) return;
+    final colors = context.colors;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760, maxHeight: 650),
-          child: MyScaffold(
-            appBar: BlurAppBar(
-              title: const Text('حركات الصندوق'),
-              automaticallyImplyLeading: false,
-              actions: [IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close))],
-            ),
-            body: Column(
-            children: [
-              Expanded(
-                child: ListView.separated(
-                  itemCount: rows.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    final amount = row.amountMinor;
-                    final amountText = '${row.direction == 'in' ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final identity = Row(
-                            children: [
-                              Icon(row.direction == 'in' ? Icons.south_west : Icons.north_east),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+      builder:
+          (dialogContext) => Dialog(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760, maxHeight: 650),
+              child: MyScaffold(
+                appBar: BlurAppBar(
+                  title: const Text('حركات الصندوق'),
+                  automaticallyImplyLeading: false,
+                  actions: [
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                body: Column(
+                  children: [
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: rows.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final row = rows[index];
+                          final amount = row.amountMinor;
+                          final amountText =
+                              '${row.direction == 'in' ? '+' : '-'}${Money(amount).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final identity = Row(
                                   children: [
-                                    Text(row.kind, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    const SizedBox(height: 2),
-                                    Text('${_prettyDate(row.occurredAt)} • ${row.partyName ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.colors.textDim, fontSize: 11)),
+                                    Icon(
+                                      row.direction == 'in'
+                                          ? Icons.south_west
+                                          : Icons.north_east,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            row.kind,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${_prettyDate(row.occurredAt)} • ${row.partyName ?? ''}',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: context.colors.textDim,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ],
-                                ),
-                              ),
-                            ],
+                                );
+                                final amountWidget = Text(
+                                  amountText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                );
+                                if (constraints.maxWidth < 440)
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      identity,
+                                      const SizedBox(height: 7),
+                                      Padding(
+                                        padding:
+                                            const EdgeInsetsDirectional.only(
+                                              start: 34,
+                                            ),
+                                        child: amountWidget,
+                                      ),
+                                    ],
+                                  );
+                                return Row(
+                                  children: [
+                                    Expanded(child: identity),
+                                    const SizedBox(width: 12),
+                                    Flexible(child: amountWidget),
+                                  ],
+                                );
+                              },
+                            ),
                           );
-                          final amountWidget = Text(amountText, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800));
-                          if (constraints.maxWidth < 440) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [identity, const SizedBox(height: 7), Padding(padding: const EdgeInsetsDirectional.only(start: 34), child: amountWidget)]);
-                          return Row(children: [Expanded(child: identity), const SizedBox(width: 12), Flexible(child: amountWidget)]);
                         },
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
               ),
-              ],
             ),
           ),
-        ),
-      ),
     );
   }
 
-  Future<void> _transfer(BuildContext context, WidgetRef ref, List<Cashbox> boxes) async {
+  Future<void> _transfer(
+    BuildContext context,
+    WidgetRef ref,
+    List<Cashbox> boxes,
+  ) async {
     var from = boxes.first.id!;
     var to = boxes[1].id!;
     final amount = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('تحويل بين الصناديق'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 440),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: from,
-                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => from = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'من صندوق'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: const Text('تحويل بين الصناديق'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 440),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: from,
+                          items:
+                              boxes
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id!,
+                                      child: Text(e.name),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) {
+                            if (value != null) setLocal(() => from = value);
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'من صندوق',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: to,
+                          items:
+                              boxes
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id!,
+                                      child: Text(e.name),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) {
+                            if (value != null) setLocal(() => to = value);
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'إلى صندوق',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: amount,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'المبلغ',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: to,
-                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => to = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'إلى صندوق'),
-                ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('تحويل')),
-          ],
-        ),
-      ),
-    );
-    if (ok == true) await ref.read(cashRepositoryProvider).postTransfer(fromCashboxId: from, toCashboxId: to, amountMinor: Money.fromMajor(amount.text));
-    amount.dispose();
-  }
-
-  Future<void> _closeSession(BuildContext context, WidgetRef ref, String sessionId, String currency) async {
-    final counted = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إغلاق جلسة الصندوق'),
-        content: TextField(controller: counted, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ المعدود فعلياً')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('إغلاق')),
-        ],
-      ),
     );
     if (ok == true) {
       try {
-        final result = await ref.read(cashRepositoryProvider).closeSession(sessionId: sessionId, countedAmountMinor: Money.fromMajor(counted.text));
+        await ref
+            .read(cashRepositoryProvider)
+            .postTransfer(
+              fromCashboxId: from,
+              toCashboxId: to,
+              amountMinor: Money.fromMajor(amount.text),
+            );
+        ref.read(dataRevisionProvider.notifier).state++;
+        if (context.mounted) _reload();
+      } catch (e) {
+        if (context.mounted) _showError(context, '$e');
+      }
+    }
+    amount.dispose();
+  }
+
+  Future<void> _closeSession(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId,
+    String currency,
+  ) async {
+    final counted = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => _ThemedDialog(
+            title: 'إغلاق جلسة الصندوق',
+            content: _ThemedField(
+              controller: counted,
+              label: 'المبلغ المعدود فعلياً',
+              keyboardType: TextInputType.number,
+            ),
+            confirmLabel: 'إغلاق',
+            onCancel: () => Navigator.pop(dialogContext, false),
+            onConfirm: () => Navigator.pop(dialogContext, true),
+          ),
+    );
+    if (ok == true) {
+      try {
+        final result = await ref
+            .read(cashRepositoryProvider)
+            .closeSession(
+              sessionId: sessionId,
+              countedAmountMinor: Money.fromMajor(counted.text),
+            );
         ref.read(dataRevisionProvider.notifier).state++;
         if (context.mounted) {
-          final expected = Money(result.expectedMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
-          final difference = Money(result.differenceMinor).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('المتوقع: $expected • الفرق: $difference')));
+          final expected = Money(result.expectedMinor).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
+          );
+          final difference = Money(result.differenceMinor).format(
+            locale: Localizations.localeOf(context).toString(),
+            currencyCode: currency,
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('المتوقع: $expected • الفرق: $difference')),
+          );
         }
       } catch (e) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) _showError(context, '$e');
       }
     }
     counted.dispose();
@@ -690,47 +1008,542 @@ class CashScreen extends ConsumerWidget {
     var box = boxes.first.id!;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text(title),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: box,
-                  items: boxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setLocal(() => box = value);
-                      onBox(value);
-                    }
-                  },
-                  decoration: const InputDecoration(labelText: 'الصندوق'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: Text(title),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: box,
+                          items:
+                              boxes
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id!,
+                                      child: Text(e.name),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setLocal(() => box = value);
+                              onBox(value);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-                if (note != null) ...[
-                  const SizedBox(height: 8),
-                  TextField(controller: note, decoration: const InputDecoration(labelText: 'ملاحظة')),
-                ],
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(
-              onPressed: () {
-                onBox(box);
-                Navigator.pop(dialogContext, true);
-              },
-              child: const Text('اعتماد'),
-            ),
-          ],
+    );
+    return ok == true;
+  }
+
+  void _showError(BuildContext context, String message) {
+    final colors = context.colors;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Text(message),
+      ),
+    );
+  }
+
+  void _showInfo(BuildContext context, String message) {
+    final colors = context.colors;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.bgElevated,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: colors.border, width: .5),
+        ),
+        content: Text(message, style: TextStyle(color: colors.textPrimary)),
+      ),
+    );
+  }
+}
+
+// =====================================================================
+// 🧩 UI Components — كل شي هون واجهة بس، ما في منطق أعمال
+// =====================================================================
+
+class _GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const _GlassAppBar({required this.title, required this.icon});
+  final String title;
+  final IconData icon;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: AppBar(
+          backgroundColor: colors.bgPage.withValues(alpha: .82),
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          shape: Border(bottom: BorderSide(color: colors.border, width: .5)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.primary.withValues(alpha: .16),
+                ),
+                child: Icon(icon, size: 18, color: colors.primary),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: colors.textPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
-    return ok == true;
+  }
+}
+
+class _GlowFab extends StatefulWidget {
+  const _GlowFab({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_GlowFab> createState() => _GlowFabState();
+}
+
+class _GlowFabState extends State<_GlowFab> {
+  bool _hover = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : (_hover ? 1.03 : 1.0),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: LinearGradient(
+                colors: [
+                  colors.primary.withValues(alpha: _hover ? 1 : .92),
+                  colors.secondary.withValues(alpha: _hover ? .9 : .8),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.primary.withValues(alpha: _hover ? .35 : .22),
+                  blurRadius: _hover ? 22 : 14,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Iconsax.add, size: 18, color: Colors.black87),
+                const SizedBox(width: 8),
+                Text(
+                  widget.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedRow extends StatelessWidget {
+  const _AnimatedRow({
+    required this.controller,
+    required this.index,
+    required this.total,
+    required this.child,
+  });
+  final AnimationController controller;
+  final int index;
+  final int total;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final clampedTotal = total.clamp(1, 12);
+    final start = (index / clampedTotal) * 0.5;
+    final end = (start + 0.5).clamp(0.0, 1.0);
+    final anim = CurvedAnimation(
+      parent: controller,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+    return FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.06),
+          end: Offset.zero,
+        ).animate(anim),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _CashTile extends StatefulWidget {
+  const _CashTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    this.trailingValue,
+    this.trailingValueColor,
+    this.trailingWidget,
+    this.menu,
+    this.onTap,
+    this.dense = false,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final String? trailingValue;
+  final Color? trailingValueColor;
+  final Widget? trailingWidget;
+  final Widget? menu;
+  final VoidCallback? onTap;
+  final bool dense;
+
+  @override
+  State<_CashTile> createState() => _CashTileState();
+}
+
+class _CashTileState extends State<_CashTile> {
+  bool _hover = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tappable = widget.onTap != null;
+
+    return MouseRegion(
+      onEnter: tappable ? (_) => setState(() => _hover = true) : null,
+      onExit: tappable ? (_) => setState(() => _hover = false) : null,
+      cursor: tappable ? SystemMouseCursors.click : MouseCursor.defer,
+      child: GestureDetector(
+        onTapDown: tappable ? (_) => setState(() => _pressed = true) : null,
+        onTapCancel: tappable ? () => setState(() => _pressed = false) : null,
+        onTapUp: tappable ? (_) => setState(() => _pressed = false) : null,
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _pressed ? 0.99 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: widget.dense ? 10 : 14,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: colors.bgElevated,
+              border: Border.all(
+                color:
+                    _hover
+                        ? widget.iconColor.withValues(alpha: .4)
+                        : colors.border,
+                width: .5,
+              ),
+              boxShadow:
+                  _hover
+                      ? [
+                        BoxShadow(
+                          color: widget.iconColor.withValues(alpha: .12),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ]
+                      : [],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(widget.dense ? 8 : 10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: widget.iconColor.withValues(
+                      alpha: _hover ? .22 : .14,
+                    ),
+                  ),
+                  child: Icon(
+                    widget.icon,
+                    color: widget.iconColor,
+                    size: widget.dense ? 16 : 20,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                          fontSize: widget.dense ? 14 : 15,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.trailingWidget != null)
+                  widget.trailingWidget!
+                else if (widget.trailingValue != null)
+                  Text(
+                    widget.trailingValue!,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: widget.trailingValueColor ?? colors.textPrimary,
+                    ),
+                  ),
+                if (widget.menu != null) widget.menu!,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: .4), width: .5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 40,
+            color: colors.textSecondary.withValues(alpha: .5),
+          ),
+          const SizedBox(height: 12),
+          Text(label, style: TextStyle(color: colors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemedDialog extends StatelessWidget {
+  const _ThemedDialog({
+    required this.title,
+    required this.content,
+    required this.confirmLabel,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+  final String title;
+  final Widget content;
+  final String confirmLabel;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AlertDialog(
+      backgroundColor: colors.bgElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: colors.border, width: .5),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          color: colors.textPrimary,
+        ),
+      ),
+      content: SizedBox(width: 420, child: content),
+      actions: [
+        TextButton(
+          onPressed: onCancel,
+          child: Text('إلغاء', style: TextStyle(color: colors.textSecondary)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: Colors.black87,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: onConfirm,
+          child: Text(confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemedField extends StatelessWidget {
+  const _ThemedField({
+    required this.controller,
+    required this.label,
+    this.keyboardType,
+  });
+  final TextEditingController controller;
+  final String label;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: TextStyle(color: colors.textPrimary),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: colors.textSecondary),
+        filled: true,
+        fillColor: colors.bgPage,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.primary, width: 1),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemedDropdown<T> extends StatelessWidget {
+  const _ThemedDropdown({
+    required this.value,
+    required this.label,
+    required this.items,
+    required this.onChanged,
+  });
+  final T value;
+  final String label;
+  final Map<T, String> items;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DropdownButtonFormField<T>(
+      value: value,
+      dropdownColor: colors.bgElevated,
+      style: TextStyle(color: colors.textPrimary),
+      items:
+          items.entries
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+              .toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: colors.textSecondary),
+        filled: true,
+        fillColor: colors.bgPage,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.border, width: .5),
+        ),
+      ),
+    );
   }
 }

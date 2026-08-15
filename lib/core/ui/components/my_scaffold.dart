@@ -42,8 +42,10 @@ class MyScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final isWindows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
     final paintBackground = forceWindowsBackground || isAndroid || isWindows;
 
     final pageBody = Stack(
