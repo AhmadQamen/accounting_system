@@ -17,16 +17,27 @@ Widget buildPage(AppRoute route) {
   return switch (route.type) {
     RouteType.dashboard => const AccountingHome(),
     RouteType.newSale => const NewDocumentScreen(kind: DocumentKind.sale),
+
     RouteType.sales => const DocumentListScreen(kind: DocumentKind.sale),
-    RouteType.purchases => const DocumentListScreen(kind: DocumentKind.purchase),
-    RouteType.saleReturns => const DocumentListScreen(kind: DocumentKind.saleReturn),
-    RouteType.purchaseReturns => const DocumentListScreen(kind: DocumentKind.purchaseReturn),
+    RouteType.purchases => const DocumentListScreen(
+      kind: DocumentKind.purchase,
+    ),
+    RouteType.saleReturns => const DocumentListScreen(
+      kind: DocumentKind.saleReturn,
+    ),
+    RouteType.purchaseReturns => const DocumentListScreen(
+      kind: DocumentKind.purchaseReturn,
+    ),
     RouteType.waste => const DocumentListScreen(kind: DocumentKind.waste),
     RouteType.inventory => const InventoryScreen(),
     RouteType.products => const ProductsScreen(),
     RouteType.warehouses => const WarehousesScreen(),
-    RouteType.inventoryAdjustments => const InventoryActionScreen(mode: InventoryActionMode.adjustment),
-    RouteType.inventoryTransfers => const InventoryActionScreen(mode: InventoryActionMode.transfer),
+    RouteType.inventoryAdjustments => const InventoryActionScreen(
+      mode: InventoryActionMode.adjustment,
+    ),
+    RouteType.inventoryTransfers => const InventoryActionScreen(
+      mode: InventoryActionMode.transfer,
+    ),
     RouteType.parties => const PartiesScreen(),
     RouteType.customers => const PartiesScreen(filterType: 'customer'),
     RouteType.suppliers => const PartiesScreen(filterType: 'supplier'),

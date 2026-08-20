@@ -30,14 +30,12 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
   }
 
   (IconData, Color) _kindVisual(BuildContext context) => switch (widget.kind) {
-        DocumentKind.sale => (Iconsax.receipt_1, context.colors.success),
-        DocumentKind.purchase =>
-          (Iconsax.shopping_cart, context.colors.secondary),
-        DocumentKind.saleReturn =>
-          (Iconsax.rotate_left, context.colors.info),
-        DocumentKind.purchaseReturn => (Iconsax.undo, context.colors.warning),
-        DocumentKind.waste => (Iconsax.warning_2, context.colors.error),
-      };
+    DocumentKind.sale => (Iconsax.receipt_1, context.colors.success),
+    DocumentKind.purchase => (Iconsax.shopping_cart, context.colors.secondary),
+    DocumentKind.saleReturn => (Iconsax.rotate_left, context.colors.info),
+    DocumentKind.purchaseReturn => (Iconsax.undo, context.colors.warning),
+    DocumentKind.waste => (Iconsax.warning_2, context.colors.error),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +43,8 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     final currency =
         ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
     final compact = showCompactPageAppBar(context);
-    final canDirectCreate = widget.kind == DocumentKind.sale ||
+    final canDirectCreate =
+        widget.kind == DocumentKind.sale ||
         widget.kind == DocumentKind.purchase ||
         widget.kind == DocumentKind.waste;
     final visual = _kindVisual(context);
@@ -70,8 +69,8 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                         await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) =>
-                                NewDocumentScreen(kind: widget.kind),
+                            builder:
+                                (_) => NewDocumentScreen(kind: widget.kind),
                           ),
                         );
                       } else {
@@ -113,14 +112,18 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                 final query = _search.text.trim().toLowerCase();
                 final allDocuments =
                     snapshot.data ?? const <AccountingDocument>[];
-                final documents = allDocuments.where((document) {
-                  if (query.isEmpty) return true;
-                  return document.displayNumber.toLowerCase().contains(query) ||
-                      (document.partyName ?? '')
-                          .toLowerCase()
-                          .contains(query) ||
-                      (document.id ?? '').toLowerCase().contains(query);
-                }).toList(growable: false);
+                final documents = allDocuments
+                    .where((document) {
+                      if (query.isEmpty) return true;
+                      return document.displayNumber.toLowerCase().contains(
+                            query,
+                          ) ||
+                          (document.partyName ?? '').toLowerCase().contains(
+                            query,
+                          ) ||
+                          (document.id ?? '').toLowerCase().contains(query);
+                    })
+                    .toList(growable: false);
                 final posted = allDocuments.where((e) => e.isPosted).length;
                 final drafts = allDocuments.where((e) => e.isDraft).length;
                 final total = allDocuments.fold<int>(
@@ -134,23 +137,24 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final narrow = constraints.maxWidth < 720;
-                        final width = narrow
-                            ? constraints.maxWidth
-                            : (constraints.maxWidth - 24) / 3;
+                        final width =
+                            narrow
+                                ? constraints.maxWidth
+                                : (constraints.maxWidth - 24) / 3;
                         final stats = [
                           (
                             'إجمالي السجل',
                             '${allDocuments.length}',
                             Icons.description_outlined,
                             visual.$2,
-                            'كل الحالات'
+                            'كل الحالات',
                           ),
                           (
                             'المعتمدة',
                             '$posted',
                             Iconsax.tick_circle,
                             context.colors.success,
-                            drafts > 0 ? '$drafts مسودة' : 'لا توجد مسودات'
+                            drafts > 0 ? '$drafts مسودة' : 'لا توجد مسودات',
                           ),
                           (
                             'القيمة الإجمالية',
@@ -161,7 +165,7 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                             ),
                             Icons.payments_outlined,
                             context.colors.primary,
-                            'حسب السجل الحالي'
+                            'حسب السجل الحالي',
                           ),
                         ];
                         return Wrap(
@@ -172,8 +176,7 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                               SizedBox(
                                 width: width,
                                 child: AnimatedEntrance(
-                                  delay:
-                                      Duration(milliseconds: 60 + i * 35),
+                                  delay: Duration(milliseconds: 60 + i * 35),
                                   child: MetricCard(
                                     label: stats[i].$1,
                                     value: stats[i].$2,
@@ -200,18 +203,19 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                                   controller: _search,
                                   hintText: 'بحث برقم المستند أو الطرف…',
                                   onChanged: (_) => setState(() {}),
-                                  trailing: _search.text.isEmpty
-                                      ? null
-                                      : IconButton(
-                                          onPressed: () {
-                                            _search.clear();
-                                            setState(() {});
-                                          },
-                                          icon: const Icon(
-                                            Iconsax.close_circle,
-                                            size: 18,
+                                  trailing:
+                                      _search.text.isEmpty
+                                          ? null
+                                          : IconButton(
+                                            onPressed: () {
+                                              _search.clear();
+                                              setState(() {});
+                                            },
+                                            icon: const Icon(
+                                              Iconsax.close_circle,
+                                              size: 18,
+                                            ),
                                           ),
-                                        ),
                                 );
                                 final count = StatusPill(
                                   label: '${documents.length} نتيجة',
@@ -245,12 +249,14 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                             const SizedBox(height: 14),
                             if (documents.isEmpty)
                               EmptyState(
-                                title: query.isEmpty
-                                    ? 'لا توجد مستندات بعد'
-                                    : 'لا توجد نتائج مطابقة',
-                                subtitle: query.isEmpty
-                                    ? 'أنشئ أول مستند لتبدأ الحركة المحاسبية.'
-                                    : 'جرّب رقم مستند أو اسم طرف مختلف.',
+                                title:
+                                    query.isEmpty
+                                        ? 'لا توجد مستندات بعد'
+                                        : 'لا توجد نتائج مطابقة',
+                                subtitle:
+                                    query.isEmpty
+                                        ? 'أنشئ أول مستند لتبدأ الحركة المحاسبية.'
+                                        : 'جرّب رقم مستند أو اسم طرف مختلف.',
                                 icon: visual.$1,
                               )
                             else
@@ -266,15 +272,14 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                                       _showDetails(context, id, currency);
                                     }
                                   },
-                                  onVoid: entry.$2.isPosted &&
-                                          entry.$2.id != null
-                                      ? () => _confirmVoid(
+                                  onVoid:
+                                      entry.$2.isPosted && entry.$2.id != null
+                                          ? () => _confirmVoid(
                                             context,
                                             entry.$2.id!,
                                           )
-                                      : null,
-                                  showDivider:
-                                      entry.$1 != documents.length - 1,
+                                          : null,
+                                  showDivider: entry.$1 != documents.length - 1,
                                 ),
                               ),
                           ],
@@ -292,10 +297,10 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
   }
 
   String _statusLabel(String status) => switch (status) {
-        'posted' => 'معتمد',
-        'void' => 'ملغى',
-        _ => 'مسودة',
-      };
+    'posted' => 'معتمد',
+    'void' => 'ملغى',
+    _ => 'مسودة',
+  };
 
   Future<void> _showDetails(
     BuildContext context,
@@ -308,115 +313,117 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     if (!context.mounted) return;
 
     final header = details.header;
-    final shouldPost = header.isDraft &&
+    final shouldPost =
+        header.isDraft &&
         (widget.kind == DocumentKind.sale ||
             widget.kind == DocumentKind.purchase);
     final action = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('${widget.kind.label} • ${header.displayNumber}'),
-        content: SizedBox(
-          width: responsiveDialogWidth(context, 720),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text('${widget.kind.label} • ${header.displayNumber}'),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 720),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    StatusPill(
-                      label: _statusLabel(header.status),
-                      color: header.isPosted
-                          ? context.colors.success
-                          : header.isVoid
-                              ? context.colors.error
-                              : context.colors.warning,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        StatusPill(
+                          label: _statusLabel(header.status),
+                          color:
+                              header.isPosted
+                                  ? context.colors.success
+                                  : header.isVoid
+                                  ? context.colors.error
+                                  : context.colors.warning,
+                        ),
+                        if (header.partyName != null)
+                          StatusPill(
+                            label: header.partyName!,
+                            color: context.colors.info,
+                            icon: Icons.person_outline_rounded,
+                          ),
+                      ],
                     ),
-                    if (header.partyName != null)
-                      StatusPill(
-                        label: header.partyName!,
-                        color: context.colors.info,
-                        icon: Icons.person_outline_rounded,
+                    const SizedBox(height: 14),
+                    for (var i = 0; i < details.items.length; i++) ...[
+                      _DetailLine(line: details.items[i], currency: currency),
+                      if (i != details.items.length - 1)
+                        const Divider(height: 1),
+                    ],
+                    const SizedBox(height: 12),
+                    const Divider(),
+                    _DetailAmount(
+                      label: 'الإجمالي',
+                      value: header.displayTotalMinor,
+                      currency: currency,
+                      emphasized: true,
+                    ),
+                    if (header.discountMinor > 0)
+                      _DetailAmount(
+                        label: 'الخصم',
+                        value: header.discountMinor,
+                        currency: currency,
                       ),
+                    if (header.paidMinor > 0)
+                      _DetailAmount(
+                        label: 'المدفوع/المقبوض',
+                        value: header.paidMinor,
+                        currency: currency,
+                      ),
+                    if (header.refundedMinor > 0)
+                      _DetailAmount(
+                        label: 'المبلغ النقدي المرتجع',
+                        value: header.refundedMinor,
+                        currency: currency,
+                      ),
+                    if (header.note?.trim().isNotEmpty == true) ...[
+                      const Divider(),
+                      Text('ملاحظات: ${header.note}'),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 14),
-                for (var i = 0; i < details.items.length; i++) ...[
-                  _DetailLine(
-                    line: details.items[i],
-                    currency: currency,
-                  ),
-                  if (i != details.items.length - 1) const Divider(height: 1),
-                ],
-                const SizedBox(height: 12),
-                const Divider(),
-                _DetailAmount(
-                  label: 'الإجمالي',
-                  value: header.displayTotalMinor,
-                  currency: currency,
-                  emphasized: true,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('إغلاق'),
+              ),
+              if (shouldPost)
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, 'post'),
+                  child: const Text('اعتماد المسودة'),
                 ),
-                if (header.discountMinor > 0)
-                  _DetailAmount(
-                    label: 'الخصم',
-                    value: header.discountMinor,
-                    currency: currency,
-                  ),
-                if (header.paidMinor > 0)
-                  _DetailAmount(
-                    label: 'المدفوع/المقبوض',
-                    value: header.paidMinor,
-                    currency: currency,
-                  ),
-                if (header.refundedMinor > 0)
-                  _DetailAmount(
-                    label: 'المبلغ النقدي المرتجع',
-                    value: header.refundedMinor,
-                    currency: currency,
-                  ),
-                if (header.note?.trim().isNotEmpty == true) ...[
-                  const Divider(),
-                  Text('ملاحظات: ${header.note}'),
-                ],
-              ],
-            ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('إغلاق'),
-          ),
-          if (shouldPost)
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, 'post'),
-              child: const Text('اعتماد المسودة'),
-            ),
-        ],
-      ),
     );
 
     if (action != 'post' || !context.mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('تأكيد الاعتماد'),
-        content: const Text(
-          'سيتم إنشاء حركات المخزون والصندوق والذمم محلياً. هل تريد المتابعة؟',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('رجوع'),
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('تأكيد الاعتماد'),
+            content: const Text(
+              'سيتم إنشاء حركات المخزون والصندوق والذمم محلياً. هل تريد المتابعة؟',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('رجوع'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('اعتماد'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('اعتماد'),
-          ),
-        ],
-      ),
     );
     if (confirmed != true) return;
 
@@ -428,41 +435,39 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
       }
       ref.read(dataRevisionProvider.notifier).state++;
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم الاعتماد محلياً')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('تم الاعتماد محلياً')));
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
       }
     }
   }
 
-  Future<void> _confirmVoid(
-    BuildContext context,
-    String documentId,
-  ) async {
+  Future<void> _confirmVoid(BuildContext context, String documentId) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إلغاء المستند المعتمد'),
-        content: const Text(
-          'لن يتم حذف المستند. سيتم إنشاء حركات عكسية للمخزون والصندوق والذمم للحفاظ على سجل التدقيق. هل تريد المتابعة؟',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('رجوع'),
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('إلغاء المستند المعتمد'),
+            content: const Text(
+              'لن يتم حذف المستند. سيتم إنشاء حركات عكسية للمخزون والصندوق والذمم للحفاظ على سجل التدقيق. هل تريد المتابعة؟',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('رجوع'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('إلغاء وعكس الحركات'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('إلغاء وعكس الحركات'),
-          ),
-        ],
-      ),
     );
     if (confirmed != true || !context.mounted) return;
 
@@ -480,17 +485,18 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
       }
     }
   }
 
   Future<void> _newReturn(BuildContext context) async {
-    final originalKind = widget.kind == DocumentKind.saleReturn
-        ? DocumentKind.sale
-        : DocumentKind.purchase;
+    final originalKind =
+        widget.kind == DocumentKind.saleReturn
+            ? DocumentKind.sale
+            : DocumentKind.purchase;
     final originals = (await ref
             .read(documentRepositoryProvider)
             .listDocuments(originalKind.dbType))
@@ -508,42 +514,47 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     var documentId = originals.first.id!;
     final selected = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text('اختيار فاتورة ${originalKind.label}'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 520),
-            child: DropdownButtonFormField<String>(
-              value: documentId,
-              items: originals
-                  .map(
-                    (document) => DropdownMenuItem(
-                      value: document.id!,
-                      child: Text(
-                        '${document.displayNumber} • ${document.partyName ?? ''}',
-                        overflow: TextOverflow.ellipsis,
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: Text('اختيار فاتورة ${originalKind.label}'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 520),
+                    child: DropdownButtonFormField<String>(
+                      value: documentId,
+                      items:
+                          originals
+                              .map(
+                                (document) => DropdownMenuItem(
+                                  value: document.id!,
+                                  child: Text(
+                                    '${document.displayNumber} • ${document.partyName ?? ''}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (value) {
+                        if (value != null) setLocal(() => documentId = value);
+                      },
+                      decoration: const InputDecoration(
+                        labelText: 'الفاتورة الأصلية',
                       ),
                     ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) setLocal(() => documentId = value);
-              },
-              decoration: const InputDecoration(labelText: 'الفاتورة الأصلية'),
-            ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, documentId),
+                      child: const Text('التالي'),
+                    ),
+                  ],
+                ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, documentId),
-              child: const Text('التالي'),
-            ),
-          ],
-        ),
-      ),
     );
     if (selected == null || !context.mounted) return;
 
@@ -563,80 +574,85 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     final cashAmount = TextEditingController(text: '0');
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('إنشاء ${widget.kind.label}'),
-        content: SizedBox(
-          width: responsiveDialogWidth(context, 680),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final item in details.items)
-                  if (item.id != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final product = Text(
-                            '${item.productName ?? 'منتج'} • مباع/مشتَرى ${_quantity(item.quantity)} ${item.unitName ?? ''}',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          );
-                          final quantity = TextField(
-                            controller: controllers[item.id!],
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: 'كمية الإرجاع',
-                            ),
-                          );
-                          if (constraints.maxWidth < 430) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                product,
-                                const SizedBox(height: 8),
-                                quantity,
-                              ],
-                            );
-                          }
-                          return Row(
-                            children: [
-                              Expanded(child: product),
-                              const SizedBox(width: 12),
-                              SizedBox(width: 150, child: quantity),
-                            ],
-                          );
-                        },
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text('إنشاء ${widget.kind.label}'),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 680),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final item in details.items)
+                      if (item.id != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final product = Text(
+                                '${item.productName ?? 'منتج'} • مباع/مشتَرى ${_quantity(item.quantity)} ${item.unitName ?? ''}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              );
+                              final quantity = TextField(
+                                controller: controllers[item.id!],
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'كمية الإرجاع',
+                                ),
+                              );
+                              if (constraints.maxWidth < 430) {
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    product,
+                                    const SizedBox(height: 8),
+                                    quantity,
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  Expanded(child: product),
+                                  const SizedBox(width: 12),
+                                  SizedBox(width: 150, child: quantity),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                    const Divider(),
+                    TextField(
+                      controller: cashAmount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText:
+                            widget.kind == DocumentKind.saleReturn
+                                ? 'المبلغ المعاد نقداً'
+                                : 'المبلغ المستلم من المورد',
                       ),
                     ),
-                const Divider(),
-                TextField(
-                  controller: cashAmount,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: widget.kind == DocumentKind.saleReturn
-                        ? 'المبلغ المعاد نقداً'
-                        : 'المبلغ المستلم من المورد',
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('اعتماد المرتجع'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('اعتماد المرتجع'),
-          ),
-        ],
-      ),
     );
 
     if (confirmed == true) {
@@ -669,13 +685,17 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
         try {
           final cashMinor = Money.fromMajor(cashAmount.text);
           if (widget.kind == DocumentKind.saleReturn) {
-            await ref.read(documentRepositoryProvider).postSaleReturn(
+            await ref
+                .read(documentRepositoryProvider)
+                .postSaleReturn(
                   saleId: selected,
                   items: returnLines,
                   refundedMinor: cashMinor,
                 );
           } else {
-            await ref.read(documentRepositoryProvider).postPurchaseReturn(
+            await ref
+                .read(documentRepositoryProvider)
+                .postPurchaseReturn(
                   purchaseId: selected,
                   items: returnLines,
                   receivedMinor: cashMinor,
@@ -689,9 +709,9 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
           }
         } catch (error) {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('$error')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('$error')));
           }
         }
       }
@@ -703,9 +723,10 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     cashAmount.dispose();
   }
 
-  String _quantity(double value) => value.truncateToDouble() == value
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(2);
+  String _quantity(double value) =>
+      value.truncateToDouble() == value
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(2);
 }
 
 class _DetailLine extends StatelessWidget {
@@ -716,16 +737,16 @@ class _DetailLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final amount = line.lineTotalMinor != 0
-        ? line.lineTotalMinor
-        : line.costAmountMinor;
+    final amount =
+        line.lineTotalMinor != 0 ? line.lineTotalMinor : line.costAmountMinor;
     final amountText = Money(amount).format(
       locale: Localizations.localeOf(context).toString(),
       currencyCode: currency,
     );
-    final quantity = line.quantity.truncateToDouble() == line.quantity
-        ? line.quantity.toStringAsFixed(0)
-        : line.quantity.toStringAsFixed(2);
+    final quantity =
+        line.quantity.truncateToDouble() == line.quantity
+            ? line.quantity.toStringAsFixed(0)
+            : line.quantity.toStringAsFixed(2);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 9),
@@ -745,10 +766,7 @@ class _DetailLine extends StatelessWidget {
                 '$quantity ${line.unitName ?? ''}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: context.colors.textDim,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: context.colors.textDim, fontSize: 11),
               ),
             ],
           );
@@ -839,20 +857,23 @@ class _DocumentRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final statusColor = document.isPosted
-        ? colors.success
-        : document.isVoid
+    final statusColor =
+        document.isPosted
+            ? colors.success
+            : document.isVoid
             ? colors.error
             : colors.warning;
-    final statusLabel = document.isPosted
-        ? 'معتمد'
-        : document.isVoid
+    final statusLabel =
+        document.isPosted
+            ? 'معتمد'
+            : document.isVoid
             ? 'ملغى'
             : 'مسودة';
     final parsed = document.occurredAt?.toLocal();
-    final date = parsed == null
-        ? '-'
-        : '${parsed.day}/${parsed.month}/${parsed.year} • ${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+    final date =
+        parsed == null
+            ? '-'
+            : '${parsed.day}/${parsed.month}/${parsed.year} • ${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
     final amountText = Money(document.displayTotalMinor).format(
       locale: Localizations.localeOf(context).toString(),
       currencyCode: currency,
@@ -885,11 +906,7 @@ class _DocumentRow extends StatelessWidget {
                 fontSize: 13,
               ),
             ),
-            StatusPill(
-              label: statusLabel,
-              color: statusColor,
-              compact: true,
-            ),
+            StatusPill(label: statusLabel, color: statusColor, compact: true),
           ],
         ),
         const SizedBox(height: 3),
@@ -933,8 +950,7 @@ class _DocumentRow extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Padding(
-                          padding:
-                              const EdgeInsetsDirectional.only(start: 54),
+                          padding: const EdgeInsetsDirectional.only(start: 54),
                           child: Text(
                             amountText,
                             maxLines: 1,
