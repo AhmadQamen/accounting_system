@@ -151,8 +151,6 @@ class LocalContextService {
           now,
           nowText,
         );
-        warehouseId = await _ensureWarehouse(txn, entityId, nowText);
-        cashboxId = await _ensureCashbox(txn, entityId, nowText);
       }
 
       await txn.insert('organization_contexts', {
@@ -162,8 +160,11 @@ class LocalContextService {
         'local_user_id': localUserId,
         'device_id': deviceId,
         'financial_year_id': financialYearId,
-        'default_warehouse_id': warehouseId,
-        'default_cashbox_id': cashboxId,
+        // A warehouse/cashbox must arrive through a verified domain event.
+        // Creating a local fallback here produces IDs that another device
+        // cannot resolve while applying inventory or cash events.
+        'default_warehouse_id': warehouseId ?? '',
+        'default_cashbox_id': cashboxId ?? '',
         'entity_name': entityName,
         'currency_code': currencyCode,
         'timezone': timezone,
@@ -259,6 +260,8 @@ LIMIT 1
       return value;
     }
 
+    String optionalValue(String column) => row[column]?.toString() ?? '';
+
     return LocalContext(
       entityId: requiredValue('entity_id'),
       membershipId: requiredValue('membership_id'),
@@ -266,8 +269,8 @@ LIMIT 1
       userId: requiredValue('local_user_id'),
       deviceId: requiredValue('device_id'),
       financialYearId: requiredValue('financial_year_id'),
-      defaultWarehouseId: requiredValue('default_warehouse_id'),
-      defaultCashboxId: requiredValue('default_cashbox_id'),
+      defaultWarehouseId: optionalValue('default_warehouse_id'),
+      defaultCashboxId: optionalValue('default_cashbox_id'),
       entityName: requiredValue('entity_name'),
       currencyCode: requiredValue('currency_code'),
       timezone: requiredValue('timezone'),
@@ -305,59 +308,10 @@ LIMIT 1
     return id;
   }
 
-  Future<String> _ensureWarehouse(
-    Transaction txn,
-    String entityId,
-    String nowText,
-  ) async {
-    final rows = await txn.query(
-      'warehouses',
-      columns: ['id'],
-      where: 'entity_id=? AND deleted_at IS NULL',
-      whereArgs: [entityId],
-      limit: 1,
-    );
-    if (rows.isNotEmpty) return rows.first['id']! as String;
-    final id = deterministicContextId(entityId, 'default-warehouse');
-    await txn.insert('warehouses', {
-      'id': id,
-      'entity_id': entityId,
-      'name': 'المستودع المحلي',
-      'created_at': nowText,
-      'updated_at': nowText,
-    });
-    return id;
-  }
-
-  Future<String> _ensureCashbox(
-    Transaction txn,
-    String entityId,
-    String nowText,
-  ) async {
-    final rows = await txn.query(
-      'cashboxes',
-      columns: ['id'],
-      where: 'entity_id=? AND deleted_at IS NULL',
-      whereArgs: [entityId],
-      limit: 1,
-    );
-    if (rows.isNotEmpty) return rows.first['id']! as String;
-    final id = deterministicContextId(entityId, 'default-cashbox');
-    await txn.insert('cashboxes', {
-      'id': id,
-      'entity_id': entityId,
-      'name': 'الصندوق المحلي',
-      'created_at': nowText,
-      'updated_at': nowText,
-    });
-    return id;
-  }
-
   void clearCache() => _cached = null;
 }
 
-/// Stable fallback IDs are required because v1 has no financial-year event
-/// and its bootstrap has no warehouse snapshot. Every new device therefore
-/// creates the same dependency IDs for the same organization.
+/// Stable IDs are only retained for the local financial-year compatibility
+/// fallback. Warehouses and cashboxes must be synchronized domain objects.
 String deterministicContextId(String entityId, String dependency) =>
     uuid.v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', '$entityId:$dependency');
