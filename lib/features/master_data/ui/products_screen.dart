@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/ui/product_details_dialog.dart';
@@ -132,6 +133,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   Future<void> _add() async {
     final name = TextEditingController();
     final unit = TextEditingController(text: 'قطعة');
+    final salePrice = TextEditingController(text: '0');
     final barcode = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -152,6 +154,15 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               const SizedBox(height: 10),
               TextField(controller: unit, decoration: const InputDecoration(labelText: 'الوحدة الرئيسية', prefixIcon: Icon(Icons.straighten_outlined))),
               const SizedBox(height: 10),
+              TextField(
+                controller: salePrice,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'سعر البيع',
+                  prefixIcon: Icon(Icons.sell_outlined),
+                ),
+              ),
+              const SizedBox(height: 10),
               TextField(controller: barcode, decoration: const InputDecoration(labelText: 'الباركود (اختياري)', prefixIcon: Icon(Icons.qr_code_scanner_outlined))),
             ],
           ),
@@ -163,15 +174,25 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
       ),
     );
     if (ok == true && name.text.trim().isNotEmpty) {
-      await ref.read(masterDataRepositoryProvider).createProduct(
-            name: name.text,
-            primaryUnitName: unit.text,
-            barcode: barcode.text,
+      try {
+        await ref.read(masterDataRepositoryProvider).createProduct(
+              name: name.text,
+              primaryUnitName: unit.text,
+              salePriceMinor: Money.fromMajor(salePrice.text),
+              barcode: barcode.text,
+            );
+        ref.read(dataRevisionProvider.notifier).state++;
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('تعذر حفظ المنتج: $error')),
           );
-      ref.read(dataRevisionProvider.notifier).state++;
+        }
+      }
     }
     name.dispose();
     unit.dispose();
+    salePrice.dispose();
     barcode.dispose();
   }
 }

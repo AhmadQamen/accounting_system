@@ -52,7 +52,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1440, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      final baseTheme = AppTheme.dark;
+      final baseTheme = AppTheme.light;
       final theme = baseTheme.copyWith(
         textTheme: baseTheme.textTheme.apply(fontFamily: 'ArabicPreview'),
         primaryTextTheme: baseTheme.primaryTextTheme.apply(
@@ -121,13 +121,22 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 900));
 
-      await tester.tap(find.text('إضافة بند').first);
+      final addLineButton = find.text('إضافة بند').first;
+      await tester.ensureVisible(addLineButton);
+      await tester.tap(addLineButton);
       await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 600));
+      await expectLater(
+        find.byType(Dialog),
+        matchesGoldenFile('goldens/invoice_add_line_dialog.png'),
+      );
       final priceField = find.byWidgetPredicate(
         (widget) =>
             widget is TextField && widget.decoration?.labelText == 'سعر الوحدة',
       );
-      await tester.enterText(priceField, '8100');
+      final priceWidget = tester.widget<TextField>(priceField);
+      expect(priceWidget.controller?.text, '8100');
+      expect(priceWidget.readOnly, isTrue);
       await tester.tap(find.widgetWithText(FilledButton, 'إضافة'));
       await tester.pump(const Duration(milliseconds: 500));
 
@@ -140,7 +149,13 @@ void main() {
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump(const Duration(milliseconds: 500));
 
+      await tester.ensureVisible(find.text('فاتورة بيع جديدة'));
+      await tester.pump(const Duration(milliseconds: 300));
+
       expect(find.text('ملخص الفاتورة'), findsOneWidget);
+      expect(find.text('ملاحظة العميل'), findsOneWidget);
+      expect(find.text('رقم الفاتورة'), findsNothing);
+      expect(find.text('التاريخ'), findsNothing);
       expect(find.text('حاسب محمول احترافي'), findsOneWidget);
       await expectLater(
         find.byType(NewDocumentScreen),
@@ -149,6 +164,71 @@ void main() {
     },
     skip: !arabicFont.existsSync(),
   );
+
+  testWidgets('fills the registered sale price when the product changes', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final baseTheme = AppTheme.dark;
+    final theme = baseTheme.copyWith(
+      textTheme: baseTheme.textTheme.apply(fontFamily: 'ArabicPreview'),
+      primaryTextTheme: baseTheme.primaryTextTheme.apply(
+        fontFamily: 'ArabicPreview',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          masterDataRepositoryProvider.overrideWithValue(_PreviewMasterData()),
+          inventoryRepositoryProvider.overrideWithValue(_PreviewInventory()),
+          localContextProvider.overrideWith(
+            (ref) async => const LocalContext(
+              entityId: 'entity-preview',
+              userId: 'user-preview',
+              deviceId: 'device-preview',
+              financialYearId: 'year-preview',
+              defaultWarehouseId: 'warehouse-main',
+              defaultCashboxId: 'cashbox-main',
+              currencyCode: 'ر.س',
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: theme,
+          home: const Directionality(
+            textDirection: TextDirection.rtl,
+            child: NewDocumentScreen(kind: DocumentKind.sale),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 900));
+    final addLineButton = find.text('إضافة بند').first;
+    await tester.ensureVisible(addLineButton);
+    await tester.tap(addLineButton);
+    await tester.pump(const Duration(milliseconds: 350));
+
+    final priceField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'سعر الوحدة',
+    );
+    expect(tester.widget<TextField>(priceField).controller?.text, '8100');
+    expect(tester.widget<TextField>(priceField).readOnly, isTrue);
+
+    final productField = find.byWidgetPredicate(
+      (widget) =>
+          widget is DropdownButtonFormField<String> &&
+          widget.decoration.labelText == 'المنتج',
+    );
+    await tester.tap(productField);
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.text('هاتف مكتبي').last);
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(tester.widget<TextField>(priceField).controller?.text, '1250');
+  }, skip: !arabicFont.existsSync());
 }
 
 class _PreviewMasterData extends MasterDataRepository {
@@ -174,12 +254,13 @@ class _PreviewMasterData extends MasterDataRepository {
   ];
 
   @override
-  Future<List<ProductUnit>> listProductUnits(String productId) async => const [
+  Future<List<ProductUnit>> listProductUnits(String productId) async => [
     ProductUnit(
-      id: 'unit-piece',
-      productId: 'product-laptop',
+      id: productId == 'product-phone' ? 'unit-phone' : 'unit-piece',
+      productId: productId,
       name: 'قطعة',
       isPrimary: true,
+      salePriceMinor: productId == 'product-phone' ? 125000 : 810000,
     ),
   ];
 }
@@ -199,6 +280,14 @@ class _PreviewInventory extends InventoryRepository {
       unitName: 'قطعة',
       inventoryItemId: 'inventory-laptop',
       currentQuantity: 13,
+    ),
+    SellableProduct(
+      productId: 'product-phone',
+      productName: 'هاتف مكتبي',
+      productUnitId: 'unit-phone',
+      unitName: 'قطعة',
+      inventoryItemId: 'inventory-phone',
+      currentQuantity: 8,
     ),
   ];
 }

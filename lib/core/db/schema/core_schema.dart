@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS devices (
   user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   device_key TEXT NOT NULL,
   name TEXT NOT NULL,
+  platform TEXT,
+  app_version TEXT,
+  registration_revoked INTEGER NOT NULL DEFAULT 0 CHECK(registration_revoked IN (0,1)),
   last_sync_at TEXT,
   last_pulled_server_seq INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -42,6 +45,31 @@ CREATE TABLE IF NOT EXISTS devices (
   revoked_at TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   UNIQUE(entity_id, device_key)
+)
+''',
+  '''
+CREATE TABLE IF NOT EXISTS organization_contexts (
+  entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+  membership_id TEXT NOT NULL,
+  server_user_id TEXT NOT NULL,
+  local_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  device_id TEXT REFERENCES devices(id) ON DELETE SET NULL,
+  financial_year_id TEXT REFERENCES financial_years(id) ON DELETE SET NULL,
+  default_warehouse_id TEXT,
+  default_cashbox_id TEXT,
+  entity_name TEXT NOT NULL,
+  currency_code TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  role TEXT NOT NULL,
+  device_revoked INTEGER NOT NULL DEFAULT 0 CHECK(device_revoked IN (0,1)),
+  updated_at TEXT NOT NULL
+)
+''',
+  '''
+CREATE TABLE IF NOT EXISTS app_state (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  active_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL
 )
 ''',
   '''
@@ -82,6 +110,7 @@ CREATE TABLE IF NOT EXISTS keyboard_shortcuts (
 ''',
   'CREATE INDEX IF NOT EXISTS idx_users_entity ON users(entity_id)',
   'CREATE INDEX IF NOT EXISTS idx_devices_entity ON devices(entity_id)',
+  'CREATE INDEX IF NOT EXISTS idx_organization_contexts_user ON organization_contexts(server_user_id)',
   'CREATE INDEX IF NOT EXISTS idx_financial_years_entity ON financial_years(entity_id)',
 ];
 

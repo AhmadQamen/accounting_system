@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:developer';
 import 'dart:io';
 
+import 'package:accounting_system/core/configs/api_config.dart';
 import 'package:accounting_system/core/errors/exceptions.dart';
+import 'package:accounting_system/core/network/session_refresh.dart';
 import 'package:dio/dio.dart';
-
-enum RefreshOutcome { refreshed, expired, networkError }
 
 class ApiClient {
   final Dio dio;
@@ -14,7 +13,7 @@ class ApiClient {
 
   final Future<String?> Function()? getAccessToken;
   final Future<RefreshOutcome> Function()? refreshSession;
-  final void Function()? onSessionExpired;
+  final FutureOr<void> Function()? onSessionExpired;
 
   static const int kTimeout = 15;
 
@@ -35,12 +34,13 @@ class ApiClient {
     String? token,
     Duration? timeout,
   }) async {
-    log(url);
+    final path = ApiConfig.requestPath(url);
+    log('API GET $path');
     final response = await _execute(
-      () => dio.get(
-        url,
+      (accessToken) => dio.get(
+        path,
         queryParameters: queryParams,
-        options: _buildOptions(token, timeout),
+        options: _buildOptions(accessToken, timeout),
       ),
       token: token,
     );
@@ -54,11 +54,15 @@ class ApiClient {
     String? token,
     Duration? timeout,
   }) async {
-    log(url);
-    log(body.toString());
+    final path = ApiConfig.requestPath(url);
+    log('API POST $path');
 
     final response = await _execute(
-      () => dio.post(url, data: body, options: _buildOptions(token, timeout)),
+      (accessToken) => dio.post(
+        path,
+        data: body,
+        options: _buildOptions(accessToken, timeout),
+      ),
       token: token,
     );
     final raw = response.data;
@@ -73,10 +77,14 @@ class ApiClient {
     String? token,
     Duration? timeout,
   }) async {
-    log(url);
-    log(body.toString());
+    final path = ApiConfig.requestPath(url);
+    log('API PUT $path');
     final response = await _execute(
-      () => dio.put(url, data: body, options: _buildOptions(token, timeout)),
+      (accessToken) => dio.put(
+        path,
+        data: body,
+        options: _buildOptions(accessToken, timeout),
+      ),
       token: token,
     );
     return parseResponse(response.data ?? {});
@@ -89,10 +97,14 @@ class ApiClient {
     String? token,
     Duration? timeout,
   }) async {
-    log(url);
-    log(body.toString());
+    final path = ApiConfig.requestPath(url);
+    log('API PATCH $path');
     final response = await _execute(
-      () => dio.patch(url, data: body, options: _buildOptions(token, timeout)),
+      (accessToken) => dio.patch(
+        path,
+        data: body,
+        options: _buildOptions(accessToken, timeout),
+      ),
       token: token,
     );
     return parseResponse(response.data ?? {});
@@ -105,10 +117,14 @@ class ApiClient {
     String? token,
     Duration? timeout,
   }) async {
-    log(url);
-    log(body.toString());
+    final path = ApiConfig.requestPath(url);
+    log('API DELETE $path');
     final response = await _execute(
-      () => dio.delete(url, data: body, options: _buildOptions(token, timeout)),
+      (accessToken) => dio.delete(
+        path,
+        data: body,
+        options: _buildOptions(accessToken, timeout),
+      ),
       token: token,
     );
     return parseResponse(response.data ?? {});
@@ -117,7 +133,6 @@ class ApiClient {
   Options _buildOptions(String? token, Duration? timeout) {
     return Options(
       headers: {
-        'Content-Type': 'application/json',
         'Accept-Language': language,
         if (token != null) 'Authorization': 'Bearer $token',
       },
@@ -127,18 +142,18 @@ class ApiClient {
   }
 
   Future<Response> _execute(
-    Future<Response> Function() request, {
+    Future<Response> Function(String? accessToken) request, {
     String? token,
+    bool allowRefresh = true,
   }) async {
+    final resolvedToken = token ?? await getAccessToken?.call();
     try {
-      final response = await request();
-      log(
-        'Response status: ${response.statusCode} data: ${jsonEncode(response.data)}',
-      );
+      final response = await request(resolvedToken);
+      log('API response status: ${response.statusCode}');
       _validateStatusCode(response);
       return response;
     } on DioException catch (e) {
-      log('DioException: ${e.message} response: ${e.response?.data}');
+      log('API DioException: ${e.type} status: ${e.response?.statusCode}');
 
       // ForceUpdateException thrown by interceptor
       if (e.error is ForceUpdateException) {
@@ -150,14 +165,17 @@ class ApiClient {
         final statusCode = response.statusCode ?? 0;
 
         if (statusCode == 401) {
-          if (refreshSession == null) throw _mapToException(response);
+          if (!allowRefresh || refreshSession == null) {
+            if (!allowRefresh) await onSessionExpired?.call();
+            throw _mapToException(response);
+          }
           final outcome = await _refreshTokenSingleFlight();
           switch (outcome) {
             case RefreshOutcome.refreshed:
               final newToken = await getAccessToken?.call();
-              return await _execute(request, token: newToken);
+              return _execute(request, token: newToken, allowRefresh: false);
             case RefreshOutcome.expired:
-              onSessionExpired?.call();
+              await onSessionExpired?.call();
               throw _mapToException(response);
             case RefreshOutcome.networkError:
               throw const NetworkException('حدثت مشكلة في الاتصال');
@@ -168,7 +186,9 @@ class ApiClient {
       }
 
       if (e.error is SocketException ||
+          e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
         throw const NetworkException('لا يوجد اتصال بالإنترنت');
       }
@@ -179,6 +199,7 @@ class ApiClient {
 
   String _extractMessage(dynamic data) {
     if (data is! Map) return 'Request failed';
+    if (data['message'] != null) return data['message'].toString();
     if (data['detail'] != null) return data['detail'].toString();
     if (data['non_field_errors'] is List) {
       final errors = data['non_field_errors'] as List;

@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
@@ -58,8 +59,20 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                           (u) => ListTile(
                             leading: Icon(u.isPrimary ? Icons.star : Icons.straighten),
                             title: Text(u.name),
-                            subtitle: Text('عامل التحويل: ${u.factor}'),
-                            trailing: u.isPrimary ? const Chip(label: Text('رئيسية')) : null,
+                            subtitle: Text(
+                              'عامل التحويل: ${u.factor} • سعر البيع: ${_moneyInput(u.salePriceMinor)}',
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (u.isPrimary) const Chip(label: Text('رئيسية')),
+                                IconButton(
+                                  tooltip: 'تعديل الوحدة والسعر',
+                                  onPressed: () => _editUnit(u),
+                                  icon: const Icon(Icons.edit_outlined),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                         const Divider(),
@@ -104,15 +117,32 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     );
   }
 
-  Future<void> _addUnit(String productId) async {
-    final name = TextEditingController();
-    final factor = TextEditingController(text: '1');
-    var primary = false;
+  Future<void> _addUnit(String productId) => _showUnitEditor(
+        productId: productId,
+      );
+
+  Future<void> _editUnit(ProductUnit unit) => _showUnitEditor(
+        productId: unit.productId,
+        existing: unit,
+      );
+
+  Future<void> _showUnitEditor({
+    required String productId,
+    ProductUnit? existing,
+  }) async {
+    final name = TextEditingController(text: existing?.name ?? '');
+    final factor = TextEditingController(
+      text: existing == null ? '1' : _numberInput(existing.factor),
+    );
+    final salePrice = TextEditingController(
+      text: _moneyInput(existing?.salePriceMinor ?? 0),
+    );
+    var primary = existing?.isPrimary ?? false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('إضافة وحدة'),
+          title: Text(existing == null ? 'إضافة وحدة' : 'تعديل الوحدة'),
           content: SizedBox(
             width: responsiveDialogWidth(context, 420),
             child: Column(
@@ -121,10 +151,20 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                 TextField(controller: name, decoration: const InputDecoration(labelText: 'اسم الوحدة')),
                 const SizedBox(height: 8),
                 TextField(controller: factor, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'عامل التحويل للوحدة الرئيسية')),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: salePrice,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'سعر البيع'),
+                ),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   value: primary,
-                  onChanged: (v) => setLocal(() => primary = v ?? false),
+                  onChanged: existing?.isPrimary == true
+                      ? null
+                      : (v) => setLocal(() => primary = v ?? false),
                   title: const Text('اجعلها الوحدة الرئيسية'),
                 ),
               ],
@@ -141,8 +181,10 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
       try {
         await ref.read(masterDataRepositoryProvider).saveProductUnit(
               productId: productId,
+              id: existing?.id,
               name: name.text,
               factor: double.parse(factor.text),
+              salePriceMinor: Money.fromMajor(salePrice.text),
               isPrimary: primary,
             );
         setState(() => revision++);
@@ -153,7 +195,18 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     }
     name.dispose();
     factor.dispose();
+    salePrice.dispose();
   }
+
+  String _moneyInput(int minor) {
+    final value = Money(minor).major.toStringAsFixed(2);
+    return value.replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  String _numberInput(double value) =>
+      value == value.truncateToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toString();
 
   Future<void> _addBarcode(List<ProductUnit> units) async {
     var unitId = units.first.id!;

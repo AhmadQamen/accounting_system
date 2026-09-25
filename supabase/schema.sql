@@ -1,19 +1,273 @@
--- =====================================================================
--- Accounting System - Supabase schema
--- Mirror of the local SQLite schema (lib/core/db/schema/*.dart)
--- Conventions:
---   * ids            -> uuid (client sends uuid.v4() text)
---   * money          -> bigint minor units (e.g. 1500 = 15.00)
---   * quantities     -> double precision
---   * flags          -> boolean (SQLite stores 0/1; Postgres accepts 1/0/true/false)
---   * timestamps     -> text ISO-8601 UTC 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
---                       (kept as TEXT so sync payloads round-trip exactly and
---                        match the Dart DateTime.toIso8601String() format)
---   * hard DELETE is not allowed from the API: deletes are soft (deleted_at)
---     or rejected (append-only ledgers)
--- Local-only tables NOT mirrored: app_context, keyboard_shortcuts,
--- sync_operations, sync_outbox, sync_changes, sync_conflicts.
--- =====================================================================
+-- ============================================================================
+-- LEGACY SUPABASE SCHEMA — NOT THE CURRENT BACKEND CONTRACT
+-- ============================================================================
+-- The official v1 backend is the Spring/PostgreSQL event API documented in:
+-- FLUTTER_SERVER_CONNECTION_AR.md, API_CONTRACT_AR.md, EVENT_CATALOG_AR.md and
+-- openapi.yaml. Do not apply this legacy Supabase projection schema to that
+-- server and do not use it to implement Flutter synchronization.
+-- This file is retained only as historical/local-schema reference.
+-- ============================================================================
+--
+-- PURPOSE
+-- -------
+-- This legacy file previously targeted a fresh Supabase/PostgreSQL project and
+-- documents:
+--   1. the business modules and tables;
+--   2. data conventions and document lifecycle;
+--   3. authentication / tenant isolation rules;
+--   4. the mobile/desktop offline sync contract;
+--   5. the remaining backend integration work.
+--
+-- Client stack: Flutter + Riverpod + SQLite (offline-first).
+-- Local database version: 6.
+-- Server target: Supabase/PostgreSQL.
+-- Local schema source: lib/core/db/schema/*.dart
+-- Client sync source: lib/core/sync/sync_engine.dart
+--
+-- HISTORICAL APPLY NOTES (DO NOT APPLY TO THE CURRENT SPRING SERVER)
+-- ------------
+-- 1. Create a new Supabase project.
+-- 2. Open SQL Editor as the project owner/service role.
+-- 3. Execute this entire file once from top to bottom.
+-- 4. Create an auth.users account, then create its public.users mapping.
+-- 5. Do not expose the service-role key to the Flutter client.
+-- 6. Implement the push transport described below; pull is already provided
+--    by get_sync_changes() and get_last_server_seq().
+--
+-- The script uses CREATE TABLE IF NOT EXISTS, CREATE OR REPLACE FUNCTION and
+-- explicit DROP/CREATE for triggers and policies, so it is safe to rerun for
+-- the objects defined here. It is not a destructive reset script.
+--
+-- ----------------------------------------------------------------------------
+-- SYSTEM MODULES AND SERVER TABLES (36)
+-- ----------------------------------------------------------------------------
+--
+-- CORE / TENANCY (4)
+--   entities, users, devices, financial_years
+--
+-- CATALOG (7)
+--   parties, categories, products, product_specifications, product_units,
+--   barcodes, warehouses
+--
+-- INVENTORY (6)
+--   inventory_items, inventory_movements,
+--   inventory_adjustments, inventory_adjustment_items,
+--   inventory_transfers, inventory_transfer_items
+--
+-- DOCUMENTS (10)
+--   sales, sale_items,
+--   purchase_invoices, purchase_items,
+--   sale_return_invoices, sale_return_items,
+--   purchase_return_invoices, purchase_return_items,
+--   waste_invoices, waste_items
+--
+-- CASH / PARTY ACCOUNTING (7)
+--   cashboxes, cash_sessions, transactions, party_ledger_entries,
+--   expenses, cash_transfers, cash_adjustments
+--
+-- SERVER SYNC INFRASTRUCTURE (2)
+--   sync_operation_receipts, sync_log
+--
+-- CLIENT-ONLY SQLITE TABLES — DO NOT CREATE ON THE SERVER
+--   app_context            selected local workspace/year/defaults
+--   keyboard_shortcuts     local UI preferences
+--   sync_operations        local record of accepted pushes
+--   sync_outbox            pending client operations
+--   sync_changes           locally applied server changes
+--   sync_conflicts         conflicts awaiting local resolution
+--
+-- ----------------------------------------------------------------------------
+-- DATA CONVENTIONS
+-- ----------------------------------------------------------------------------
+--
+-- IDs
+--   PostgreSQL: uuid.
+--   Flutter creates IDs using uuid.v4() before offline inserts.
+--   The server MUST preserve client-generated IDs for idempotency.
+--
+-- MONEY
+--   All monetary values use bigint minor units; never float/decimal.
+--   Example: 15.00 is stored as 1500 when the currency has two decimals.
+--   Relevant columns end with _minor.
+--
+-- QUANTITIES
+--   Stored as double precision. A selected unit is converted to base units by:
+--     base_quantity = quantity * unit_factor_at_<operation>
+--   Historical unit factors are copied into document items and never inferred
+--   later from the current product_units row.
+--
+-- TIME
+--   Timestamps and business dates are ISO-8601 UTC text, intentionally matching
+--   Dart DateTime.toIso8601String(). Do not silently convert payload fields to
+--   locale-formatted dates.
+--
+-- MULTI-TENANCY
+--   entity_id is the tenant boundary. Every request must be authenticated and
+--   every inserted/updated entity-scoped row must match auth_entity_id().
+--   Never accept entity_id only because it is present in a client payload.
+--
+-- SOFT DELETE
+--   Mutable master data uses deleted_at. Hard DELETE is not part of the public
+--   API. Immutable ledger rows reject UPDATE and DELETE at trigger level.
+--
+-- VERSIONING
+--   Mutable/versioned rows start at version = 1. Server triggers increment the
+--   version on UPDATE. The resulting row is recorded in sync_log.
+--
+-- ----------------------------------------------------------------------------
+-- ACCOUNTING INVARIANTS
+-- ----------------------------------------------------------------------------
+--
+-- DOCUMENT STATUS
+--   draft -> posted -> void
+--   A posted/void document is immutable except the controlled posted -> void
+--   transition. Corrections must be represented by reversal ledger rows.
+--
+-- APPEND-ONLY TABLES
+--   inventory_movements, transactions, party_ledger_entries,
+--   sale_items, purchase_items, sale_return_items, purchase_return_items,
+--   waste_items, inventory_adjustment_items, inventory_transfer_items.
+--   These tables reject UPDATE/DELETE on the server.
+--
+-- CACHE FIELDS
+--   inventory_items.current_quantity
+--   inventory_items.inventory_value_minor
+--   cashboxes.current_balance_minor
+--   parties.current_balance_minor
+--   These are cached balances. Their source of truth is respectively:
+--   inventory_movements, transactions, and party_ledger_entries.
+--   A backend should not trust client-supplied cache totals; derive/rebuild them
+--   transactionally from immutable ledgers.
+--
+-- POSTING MUST BE ATOMIC
+--   Posting/voiding any sale, purchase, return, waste, expense, transfer or
+--   adjustment must run in one database transaction and either write all of:
+--     header + items + inventory ledger + cash ledger + party ledger
+--   or write nothing.
+--
+-- FINANCIAL YEAR
+--   New accounting movements require an open financial_years row. Closed years
+--   must reject new posting and voiding unless an explicit privileged workflow
+--   is later designed.
+--
+-- ----------------------------------------------------------------------------
+-- AUTHENTICATION AND ONBOARDING
+-- ----------------------------------------------------------------------------
+--
+-- public.users.auth_user_id references auth.users.id.
+-- auth_entity_id() resolves the tenant through that mapping.
+-- Recommended onboarding order (server/service-role operation):
+--   1. create auth.users account;
+--   2. create entities row;
+--   3. create public.users row with auth_user_id + entity_id;
+--   4. create financial_years row;
+--   5. create default warehouse and cashbox;
+--   6. register the client device.
+--
+-- RLS is enabled on all public business tables. The supplied policies scope
+-- rows to auth_entity_id(). Administrative onboarding must therefore run via a
+-- trusted server/service-role path, not by exposing service credentials.
+--
+-- ----------------------------------------------------------------------------
+-- OFFLINE SYNC CONTRACT REQUIRED BY THE FLUTTER CLIENT
+-- ----------------------------------------------------------------------------
+--
+-- The Flutter app stores one operation in sync_outbox for each local mutation.
+-- SyncEngine calls a SyncTransport with the following logical contract.
+--
+-- PUSH REQUEST
+--   POST /sync/push                           (name may change)
+--   Authorization: Bearer <Supabase JWT>
+--   Content-Type: application/json
+--
+--   {
+--     "operation_id": "uuid",
+--     "entity_id": "uuid",
+--     "aggregate_type": "sale",
+--     "aggregate_id": "uuid",
+--     "action": "post",
+--     "payload_json": "{...}",
+--     "created_at": "ISO-8601 UTC"
+--   }
+--
+-- PUSH RESPONSE
+--   {
+--     "operationId": "uuid",
+--     "accepted": true,
+--     "error": null
+--   }
+--
+-- PUSH REQUIREMENTS
+--   * Authenticate the JWT and derive entity/user on the server.
+--   * Reject operation.entity_id when it differs from auth_entity_id().
+--   * Treat operation_id as an idempotency key. Retrying the same operation
+--     must return the original result without applying accounting entries twice.
+--   * Decode payload_json as an object and validate IDs, status and ownership.
+--   * Apply the aggregate in a single transaction.
+--   * Return accepted=false plus a stable error message for business rejection.
+--   * Do not accept arbitrary table names or arbitrary SQL from the client.
+--
+-- IDEMPOTENCY FLOW USING sync_operation_receipts
+--   1. Insert operation_id with status='processing' using ON CONFLICT DO NOTHING.
+--   2. If the insert conflicts, load and return the stored result; do not replay.
+--   3. Apply the validated aggregate in the same controlled backend workflow.
+--   4. Store accepted/rejected result and response_json on the receipt.
+--   5. A stale 'processing' receipt requires an explicit recovery policy; never
+--      assume it is safe to execute the accounting mutation a second time.
+--
+-- AGGREGATE TYPES CURRENTLY EMITTED BY THE APP
+--   party, category, product, product_unit, barcode, product_specification,
+--   warehouse, financial_year, cashbox,
+--   inventory_opening, inventory_adjustment, inventory_transfer,
+--   sale, purchase, sale_return, purchase_return, waste,
+--   cash_opening_balance, expense, cash_transfer, cash_adjustment,
+--   party_payment, cash_session.
+--
+-- ACTIONS CURRENTLY EMITTED
+--   create, update, delete, draft, post, void, open, close.
+--
+-- IMPORTANT PUSH GAP
+--   This SQL file supplies tables, constraints, RLS, triggers and the pull feed.
+--   It intentionally does not expose a generic dynamic-SQL push RPC. The backend
+--   developer must implement a validated Edge Function/API dispatcher for the
+--   aggregate/action pairs above, plus persistent operation-id deduplication.
+--   The Flutter default transport is currently DisabledSyncTransport until that
+--   endpoint is connected.
+--
+-- PULL REQUEST
+--   The backend can call the supplied RPC directly:
+--     select * from get_sync_changes(<entity_uuid>, <last_server_seq>);
+--
+-- PULL RESPONSE ITEM
+--   {
+--     "server_seq": 123,
+--     "table_name": "products",
+--     "record_id": "uuid",
+--     "change_type": "insert|update|delete",
+--     "record_version": 2,
+--     "payload_json": { ... complete row ... },
+--     "changed_at": "ISO-8601 UTC"
+--   }
+--
+-- The client applies changes in server_seq order, stores its cursor in
+-- devices.last_pulled_server_seq, then rebuilds cached balances from ledgers.
+-- Maximum rows returned per call: 1000. Call repeatedly until caught up.
+--
+-- ----------------------------------------------------------------------------
+-- BACKEND DELIVERY CHECKLIST
+-- ----------------------------------------------------------------------------
+-- [ ] Apply this schema to Supabase.
+-- [ ] Configure Auth and trusted onboarding.
+-- [ ] Implement idempotent /sync/push dispatcher.
+-- [ ] Connect Flutter SyncTransport to push + get_sync_changes pull.
+-- [ ] Add integration tests for retrying the same operation_id.
+-- [ ] Test tenant isolation with two different entity users.
+-- [ ] Test draft -> posted -> void and reject all other status mutations.
+-- [ ] Test atomic rollback when any ledger insert fails.
+-- [ ] Test conflict/version behavior and pull pagination above 1000 changes.
+-- [ ] Keep the Supabase service-role key server-side only.
+--
+-- ============================================================================
 
 create extension if not exists pgcrypto;
 
@@ -160,11 +414,16 @@ create table if not exists product_units (
   name text not null,
   factor double precision not null default 1 check (factor > 0),
   is_primary boolean not null default false,
+  sale_price_minor bigint not null default 0 check (sale_price_minor >= 0),
   created_at text not null default iso_now(),
   updated_at text not null default iso_now(),
   deleted_at text,
   version integer not null default 1
 );
+
+alter table product_units
+  add column if not exists sale_price_minor bigint not null default 0
+  check (sale_price_minor >= 0);
 
 create table if not exists barcodes (
   id uuid primary key default gen_random_uuid(),
@@ -642,9 +901,30 @@ create table if not exists cash_adjustments (
 );
 
 -- ---------------------------------------------------------------------
--- 6. sync change feed (server-side; consumed by pull)
+-- 6. server sync infrastructure
 -- ---------------------------------------------------------------------
 
+-- Service-role-only receipt table used to make client push operations
+-- idempotent. RLS is enabled below with no authenticated/anon policies.
+create table if not exists sync_operation_receipts (
+  operation_id uuid primary key,
+  entity_id uuid not null references entities(id) on delete cascade,
+  device_id uuid references devices(id) on delete set null,
+  user_id uuid references users(id) on delete set null,
+  aggregate_type text not null,
+  aggregate_id uuid not null,
+  action text not null,
+  request_hash text,
+  status text not null default 'processing'
+    check (status in ('processing','accepted','rejected','failed')),
+  accepted boolean,
+  error_message text,
+  response_json jsonb,
+  received_at text not null default iso_now(),
+  completed_at text
+);
+
+-- Ordered server-side change feed consumed by pull synchronization.
 create table if not exists sync_log (
   seq bigint generated always as identity primary key,
   entity_id uuid not null,
@@ -693,6 +973,10 @@ create index if not exists idx_party_ledger_reference on party_ledger_entries(re
 create index if not exists idx_expenses_date on expenses(entity_id, occurred_at);
 create index if not exists idx_transfers_status on cash_transfers(entity_id, status);
 create index if not exists idx_cash_adjustments_status on cash_adjustments(entity_id, status);
+create index if not exists idx_sync_receipts_entity_received
+  on sync_operation_receipts(entity_id, received_at);
+create index if not exists idx_sync_receipts_aggregate
+  on sync_operation_receipts(entity_id, aggregate_type, aggregate_id);
 create index if not exists idx_sync_log_entity_seq on sync_log(entity_id, seq);
 create index if not exists idx_sync_log_record on sync_log(entity_id, table_name, record_id);
 
@@ -895,6 +1179,7 @@ alter table party_ledger_entries enable row level security;
 alter table expenses enable row level security;
 alter table cash_transfers enable row level security;
 alter table cash_adjustments enable row level security;
+alter table sync_operation_receipts enable row level security;
 alter table sync_log enable row level security;
 
 do $$
@@ -948,6 +1233,9 @@ create policy update_users on users for update to authenticated using (entity_id
 -- sync_log: read-only via API (writes happen only through table triggers)
 drop policy if exists select_sync_log on sync_log;
 create policy select_sync_log on sync_log for select to authenticated using (entity_id = auth_entity_id());
+
+-- sync_operation_receipts intentionally has no anon/authenticated policies.
+-- It is accessed only by the trusted push endpoint using the service role.
 
 -- ---------------------------------------------------------------------
 -- 11. sync RPC (pull change feed, mirrors SyncTransport.pull contract)

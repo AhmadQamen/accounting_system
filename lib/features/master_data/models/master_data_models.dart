@@ -62,13 +62,116 @@ class Product {
 }
 
 class ProductUnit {
-  final String? id; final String? entityId; final String productId; final String name; final double factor; final bool isPrimary; final DateTime? createdAt; final DateTime? updatedAt; final DateTime? deletedAt; final int version;
-  const ProductUnit({this.id,this.entityId,required this.productId,required this.name,this.factor=1,this.isPrimary=false,this.createdAt,this.updatedAt,this.deletedAt,this.version=1});
-  factory ProductUnit.fromSql(Map<String,Object?> r)=>ProductUnit(id:stringOrNull(r['id']),entityId:stringOrNull(r['entity_id']),productId:r['product_id']?.toString()??'',name:r['name']?.toString()??'',factor:doubleValue(r['factor'],1),isPrimary:boolValue(r['is_primary']),createdAt:parseDate(r['created_at']),updatedAt:parseDate(r['updated_at']),deletedAt:parseDate(r['deleted_at']),version:intValue(r['version'],1));
-  factory ProductUnit.fromJson(Map<String,dynamic> r)=>ProductUnit(id:stringOrNull(r['id']),entityId:stringOrNull(r['entityId']??r['entity_id']),productId:(r['productId']??r['product_id'])?.toString()??'',name:r['name']?.toString()??'',factor:doubleValue(r['factor'],1),isPrimary:boolValue(r['isPrimary']??r['is_primary']),createdAt:parseDate(r['createdAt']??r['created_at']),updatedAt:parseDate(r['updatedAt']??r['updated_at']),deletedAt:parseDate(r['deletedAt']??r['deleted_at']),version:intValue(r['version'],1));
-  Map<String,Object?> toSql()=>{if(id!=null)'id':id,'entity_id':entityId,'product_id':productId,'name':name,'factor':factor,'is_primary':isPrimary?1:0,'created_at':isoUtc(createdAt),'updated_at':isoUtc(updatedAt),'deleted_at':isoUtc(deletedAt),'version':version};
-  Map<String,dynamic> toJson()=>{if(id!=null)'id':id,'entityId':entityId,'productId':productId,'name':name,'factor':factor,'isPrimary':isPrimary,'createdAt':isoUtc(createdAt),'updatedAt':isoUtc(updatedAt),'deletedAt':isoUtc(deletedAt),'version':version};
-  ProductUnit copyWith({Object?id=unset,Object?entityId=unset,Object?productId=unset,Object?name=unset,Object?factor=unset,Object?isPrimary=unset,Object?createdAt=unset,Object?updatedAt=unset,Object?deletedAt=unset,Object?version=unset})=>ProductUnit(id:id is Unset?this.id:id as String?,entityId:entityId is Unset?this.entityId:entityId as String?,productId:productId is Unset?this.productId:productId as String,name:name is Unset?this.name:name as String,factor:factor is Unset?this.factor:factor as double,isPrimary:isPrimary is Unset?this.isPrimary:isPrimary as bool,createdAt:createdAt is Unset?this.createdAt:createdAt as DateTime?,updatedAt:updatedAt is Unset?this.updatedAt:updatedAt as DateTime?,deletedAt:deletedAt is Unset?this.deletedAt:deletedAt as DateTime?,version:version is Unset?this.version:version as int);
+  final String? id;
+  final String? entityId;
+  final String productId;
+  final String name;
+  final double factor;
+  final bool isPrimary;
+  final int salePriceMinor;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
+  final int version;
+
+  const ProductUnit({
+    this.id,
+    this.entityId,
+    required this.productId,
+    required this.name,
+    this.factor = 1,
+    this.isPrimary = false,
+    this.salePriceMinor = 0,
+    this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
+    this.version = 1,
+  });
+
+  factory ProductUnit.fromSql(Map<String, Object?> r) => ProductUnit(
+    id: stringOrNull(r['id']),
+    entityId: stringOrNull(r['entity_id']),
+    productId: r['product_id']?.toString() ?? '',
+    name: r['name']?.toString() ?? '',
+    factor: doubleValue(r['factor'], 1),
+    isPrimary: boolValue(r['is_primary']),
+    salePriceMinor: intValue(r['sale_price_minor']),
+    createdAt: parseDate(r['created_at']),
+    updatedAt: parseDate(r['updated_at']),
+    deletedAt: parseDate(r['deleted_at']),
+    version: intValue(r['version'], 1),
+  );
+
+  factory ProductUnit.fromJson(Map<String, dynamic> r) => ProductUnit(
+    id: stringOrNull(r['id']),
+    entityId: stringOrNull(r['entityId'] ?? r['entity_id']),
+    productId: (r['productId'] ?? r['product_id'])?.toString() ?? '',
+    name: r['name']?.toString() ?? '',
+    factor: doubleValue(r['factor'], 1),
+    isPrimary: boolValue(r['isPrimary'] ?? r['is_primary']),
+    salePriceMinor: intValue(r['salePriceMinor'] ?? r['sale_price_minor']),
+    createdAt: parseDate(r['createdAt'] ?? r['created_at']),
+    updatedAt: parseDate(r['updatedAt'] ?? r['updated_at']),
+    deletedAt: parseDate(r['deletedAt'] ?? r['deleted_at']),
+    version: intValue(r['version'], 1),
+  );
+
+  Map<String, Object?> toSql() => {
+    if (id != null) 'id': id,
+    'entity_id': entityId,
+    'product_id': productId,
+    'name': name,
+    'factor': factor,
+    'is_primary': isPrimary ? 1 : 0,
+    'sale_price_minor': salePriceMinor,
+    'created_at': isoUtc(createdAt),
+    'updated_at': isoUtc(updatedAt),
+    'deleted_at': isoUtc(deletedAt),
+    'version': version,
+  };
+
+  Map<String, dynamic> toJson() => {
+    if (id != null) 'id': id,
+    'entityId': entityId,
+    'productId': productId,
+    'name': name,
+    'factor': factor,
+    'isPrimary': isPrimary,
+    'salePriceMinor': salePriceMinor,
+    'createdAt': isoUtc(createdAt),
+    'updatedAt': isoUtc(updatedAt),
+    'deletedAt': isoUtc(deletedAt),
+    'version': version,
+  };
+
+  ProductUnit copyWith({
+    Object? id = unset,
+    Object? entityId = unset,
+    Object? productId = unset,
+    Object? name = unset,
+    Object? factor = unset,
+    Object? isPrimary = unset,
+    Object? salePriceMinor = unset,
+    Object? createdAt = unset,
+    Object? updatedAt = unset,
+    Object? deletedAt = unset,
+    Object? version = unset,
+  }) => ProductUnit(
+    id: id is Unset ? this.id : id as String?,
+    entityId: entityId is Unset ? this.entityId : entityId as String?,
+    productId: productId is Unset ? this.productId : productId as String,
+    name: name is Unset ? this.name : name as String,
+    factor: factor is Unset ? this.factor : factor as double,
+    isPrimary: isPrimary is Unset ? this.isPrimary : isPrimary as bool,
+    salePriceMinor:
+        salePriceMinor is Unset
+            ? this.salePriceMinor
+            : salePriceMinor as int,
+    createdAt: createdAt is Unset ? this.createdAt : createdAt as DateTime?,
+    updatedAt: updatedAt is Unset ? this.updatedAt : updatedAt as DateTime?,
+    deletedAt: deletedAt is Unset ? this.deletedAt : deletedAt as DateTime?,
+    version: version is Unset ? this.version : version as int,
+  );
 }
 
 class Barcode {

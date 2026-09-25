@@ -17,20 +17,32 @@ class MasterDataRepository {
     final where = <String>['entity_id = ?', 'deleted_at IS NULL'];
     final args = <Object?>[ctx.entityId];
     if (type != null && type != 'all') {
-      where.add(type == 'customer'
-          ? "type IN ('customer','both')"
-          : "type IN ('supplier','both')");
+      where.add(
+        type == 'customer'
+            ? "type IN ('customer','both')"
+            : "type IN ('supplier','both')",
+      );
     }
     if (search.trim().isNotEmpty) {
       where.add('(name LIKE ? OR phone LIKE ?)');
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
-    final rows = await db.query('parties', where: where.join(' AND '), whereArgs: args, orderBy: 'name COLLATE NOCASE');
+    final rows = await db.query(
+      'parties',
+      where: where.join(' AND '),
+      whereArgs: args,
+      orderBy: 'name COLLATE NOCASE',
+    );
     return rows.map(Party.fromSql).toList(growable: false);
   }
 
-  Future<String> saveParty({String? id, required String name, String? phone, required String type}) async {
+  Future<String> saveParty({
+    String? id,
+    required String name,
+    String? phone,
+    required String type,
+  }) async {
     final ctx = await LocalContextService.instance.current;
     final now = DateTime.now().toUtc().toIso8601String();
     final partyId = id ?? uuid.v4();
@@ -46,20 +58,27 @@ class MasterDataRepository {
           'updated_at': now,
         });
       } else {
-        await txn.update('parties', {
-          'name': name.trim(),
-          'phone': phone?.trim(),
-          'type': type,
-          'updated_at': now,
-          'version': await _nextVersion(txn, 'parties', partyId),
-        }, where: 'id = ? AND entity_id = ?', whereArgs: [partyId, ctx.entityId]);
+        await txn.update(
+          'parties',
+          {
+            'name': name.trim(),
+            'phone': phone?.trim(),
+            'type': type,
+            'updated_at': now,
+            'version': await _nextVersion(txn, 'parties', partyId),
+          },
+          where: 'id = ? AND entity_id = ?',
+          whereArgs: [partyId, ctx.entityId],
+        );
       }
-      await _outbox.enqueue(txn,
-          entityId: ctx.entityId,
-          aggregateType: 'party',
-          aggregateId: partyId,
-          action: id == null ? 'create' : 'update',
-          payload: {'id': partyId, 'name': name.trim(), 'phone': phone, 'type': type});
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'party',
+        partyId,
+        id == null ? 'PartyCreated' : 'PartyUpdated',
+        now,
+      );
     });
     return partyId;
   }
@@ -68,16 +87,32 @@ class MasterDataRepository {
     final ctx = await LocalContextService.instance.current;
     final now = DateTime.now().toUtc().toIso8601String();
     await _database.transaction((txn) async {
-      await txn.update('parties', {'deleted_at': now, 'updated_at': now},
-          where: 'id = ? AND entity_id = ?', whereArgs: [id, ctx.entityId]);
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'party', aggregateId: id, action: 'delete', payload: {'id': id, 'deleted_at': now});
+      await txn.update(
+        'parties',
+        {'deleted_at': now, 'updated_at': now},
+        where: 'id = ? AND entity_id = ?',
+        whereArgs: [id, ctx.entityId],
+      );
+      await _enqueueDeleted(
+        txn,
+        ctx.entityId,
+        'party',
+        id,
+        'PartyDeleted',
+        now,
+      );
     });
   }
 
   Future<List<Category>> listCategories() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('categories', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query(
+      'categories',
+      where: 'entity_id = ? AND deleted_at IS NULL',
+      whereArgs: [ctx.entityId],
+      orderBy: 'name',
+    );
     return rows.map(Category.fromSql).toList(growable: false);
   }
 
@@ -87,11 +122,33 @@ class MasterDataRepository {
     final categoryId = id ?? uuid.v4();
     await _database.transaction((txn) async {
       if (id == null) {
-        await txn.insert('categories', {'id': categoryId, 'entity_id': ctx.entityId, 'name': name.trim(), 'created_at': now, 'updated_at': now});
+        await txn.insert('categories', {
+          'id': categoryId,
+          'entity_id': ctx.entityId,
+          'name': name.trim(),
+          'created_at': now,
+          'updated_at': now,
+        });
       } else {
-        await txn.update('categories', {'name': name.trim(), 'updated_at': now, 'version': await _nextVersion(txn, 'categories', categoryId)}, where: 'id = ? AND entity_id = ?', whereArgs: [categoryId, ctx.entityId]);
+        await txn.update(
+          'categories',
+          {
+            'name': name.trim(),
+            'updated_at': now,
+            'version': await _nextVersion(txn, 'categories', categoryId),
+          },
+          where: 'id = ? AND entity_id = ?',
+          whereArgs: [categoryId, ctx.entityId],
+        );
       }
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'category', aggregateId: categoryId, action: id == null ? 'create' : 'update', payload: {'id': categoryId, 'name': name.trim()});
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'category',
+        categoryId,
+        id == null ? 'CategoryCreated' : 'CategoryUpdated',
+        now,
+      );
     });
     return categoryId;
   }
@@ -102,7 +159,8 @@ class MasterDataRepository {
     final args = <Object?>[ctx.entityId];
     var where = 'p.entity_id = ? AND p.deleted_at IS NULL';
     if (search.trim().isNotEmpty) {
-      where += ' AND (p.name LIKE ? OR EXISTS (SELECT 1 FROM product_units u JOIN barcodes b ON b.product_unit_id = u.id WHERE u.product_id = p.id AND b.deleted_at IS NULL AND b.code LIKE ?))';
+      where +=
+          ' AND (p.name LIKE ? OR EXISTS (SELECT 1 FROM product_units u JOIN barcodes b ON b.product_unit_id = u.id WHERE u.product_id = p.id AND b.deleted_at IS NULL AND b.code LIKE ?))';
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
@@ -118,13 +176,24 @@ ORDER BY p.name COLLATE NOCASE
     return rows.map(Product.fromSql).toList(growable: false);
   }
 
-  Future<String> createProduct({required String name, String? categoryId, double minQuantity = 0, String primaryUnitName = 'Unit', String? barcode}) async {
+  Future<String> createProduct({
+    required String name,
+    String? categoryId,
+    double minQuantity = 0,
+    String primaryUnitName = 'Unit',
+    int salePriceMinor = 0,
+    String? barcode,
+  }) async {
+    if (salePriceMinor < 0) {
+      throw ArgumentError('Sale price must be non-negative');
+    }
     final ctx = await LocalContextService.instance.current;
     final now = DateTime.now().toUtc().toIso8601String();
     final productId = uuid.v4();
     final unitId = uuid.v4();
     final inventoryItemId = uuid.v4();
-    final barcodeId = barcode != null && barcode.trim().isNotEmpty ? uuid.v4() : null;
+    final barcodeId =
+        barcode != null && barcode.trim().isNotEmpty ? uuid.v4() : null;
     await _database.transaction((txn) async {
       await txn.insert('products', {
         'id': productId,
@@ -139,9 +208,11 @@ ORDER BY p.name COLLATE NOCASE
         'id': unitId,
         'entity_id': ctx.entityId,
         'product_id': productId,
-        'name': primaryUnitName.trim().isEmpty ? 'Unit' : primaryUnitName.trim(),
+        'name':
+            primaryUnitName.trim().isEmpty ? 'Unit' : primaryUnitName.trim(),
         'factor': 1.0,
         'is_primary': 1,
+        'sale_price_minor': salePriceMinor,
         'created_at': now,
         'updated_at': now,
       });
@@ -165,7 +236,32 @@ ORDER BY p.name COLLATE NOCASE
           'updated_at': now,
         });
       }
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'product', aggregateId: productId, action: 'create', payload: {'id': productId, 'name': name.trim(), 'category_id': categoryId, 'min_quantity': minQuantity, 'primary_unit': {'id': unitId, 'name': primaryUnitName.trim().isEmpty ? 'Unit' : primaryUnitName.trim(), 'factor': 1.0}, 'barcode': barcodeId == null ? null : {'id': barcodeId, 'code': barcode!.trim(), 'product_unit_id': unitId}, 'inventory_item': {'id': inventoryItemId, 'warehouse_id': ctx.defaultWarehouseId, 'product_id': productId}});
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'product',
+        productId,
+        'ProductCreated',
+        now,
+      );
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'product_unit',
+        unitId,
+        'ProductUnitCreated',
+        now,
+      );
+      if (barcodeId != null) {
+        await _enqueueMaster(
+          txn,
+          ctx.entityId,
+          'barcode',
+          barcodeId,
+          'BarcodeCreated',
+          now,
+        );
+      }
     });
     return productId;
   }
@@ -187,10 +283,14 @@ ORDER BY p.name COLLATE NOCASE
     String? id,
     required String name,
     required double factor,
+    int salePriceMinor = 0,
     bool isPrimary = false,
   }) async {
     if (name.trim().isEmpty) throw ArgumentError('Unit name is required');
     if (factor <= 0) throw ArgumentError('Unit factor must be > 0');
+    if (salePriceMinor < 0) {
+      throw ArgumentError('Sale price must be non-negative');
+    }
     final ctx = await LocalContextService.instance.current;
     final unitId = id ?? uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -199,7 +299,8 @@ ORDER BY p.name COLLATE NOCASE
         await txn.update(
           'product_units',
           {'is_primary': 0, 'updated_at': now},
-          where: 'entity_id=? AND product_id=? AND id<>? AND deleted_at IS NULL',
+          where:
+              'entity_id=? AND product_id=? AND id<>? AND deleted_at IS NULL',
           whereArgs: [ctx.entityId, productId, unitId],
         );
         factor = 1;
@@ -212,25 +313,32 @@ ORDER BY p.name COLLATE NOCASE
           'name': name.trim(),
           'factor': factor,
           'is_primary': isPrimary ? 1 : 0,
+          'sale_price_minor': salePriceMinor,
           'created_at': now,
           'updated_at': now,
         });
       } else {
-        await txn.update('product_units', {
-          'name': name.trim(),
-          'factor': factor,
-          'is_primary': isPrimary ? 1 : 0,
-          'updated_at': now,
-          'version': await _nextVersion(txn, 'product_units', unitId),
-        }, where: 'id=? AND entity_id=? AND product_id=?', whereArgs: [unitId, ctx.entityId, productId]);
+        await txn.update(
+          'product_units',
+          {
+            'name': name.trim(),
+            'factor': factor,
+            'is_primary': isPrimary ? 1 : 0,
+            'sale_price_minor': salePriceMinor,
+            'updated_at': now,
+            'version': await _nextVersion(txn, 'product_units', unitId),
+          },
+          where: 'id=? AND entity_id=? AND product_id=?',
+          whereArgs: [unitId, ctx.entityId, productId],
+        );
       }
-      await _outbox.enqueue(
+      await _enqueueMaster(
         txn,
-        entityId: ctx.entityId,
-        aggregateType: 'product_unit',
-        aggregateId: unitId,
-        action: id == null ? 'create' : 'update',
-        payload: {'id': unitId, 'product_id': productId, 'name': name.trim(), 'factor': factor, 'is_primary': isPrimary},
+        ctx.entityId,
+        'product_unit',
+        unitId,
+        id == null ? 'ProductUnitCreated' : 'ProductUnitUpdated',
+        now,
       );
     });
     return unitId;
@@ -239,17 +347,23 @@ ORDER BY p.name COLLATE NOCASE
   Future<List<Barcode>> listBarcodes(String productId) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT b.*, u.name AS unit_name
 FROM barcodes b
 JOIN product_units u ON u.id=b.product_unit_id
 WHERE b.entity_id=? AND u.product_id=? AND b.deleted_at IS NULL AND u.deleted_at IS NULL
 ORDER BY b.code
-''', [ctx.entityId, productId]);
+''',
+      [ctx.entityId, productId],
+    );
     return rows.map(Barcode.fromSql).toList(growable: false);
   }
 
-  Future<String> addBarcode({required String productUnitId, required String code}) async {
+  Future<String> addBarcode({
+    required String productUnitId,
+    required String code,
+  }) async {
     if (code.trim().isEmpty) throw ArgumentError('Barcode is required');
     final ctx = await LocalContextService.instance.current;
     final id = uuid.v4();
@@ -263,20 +377,39 @@ ORDER BY b.code
         'created_at': now,
         'updated_at': now,
       });
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'barcode', aggregateId: id, action: 'create', payload: {'id': id, 'product_unit_id': productUnitId, 'code': code.trim()});
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'barcode',
+        id,
+        'BarcodeCreated',
+        now,
+      );
     });
     return id;
   }
 
-  Future<List<ProductSpecification>> listProductSpecifications(String productId) async {
+  Future<List<ProductSpecification>> listProductSpecifications(
+    String productId,
+  ) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('product_specifications', where: 'entity_id=? AND product_id=? AND deleted_at IS NULL', whereArgs: [ctx.entityId, productId], orderBy: 'title');
+    final rows = await db.query(
+      'product_specifications',
+      where: 'entity_id=? AND product_id=? AND deleted_at IS NULL',
+      whereArgs: [ctx.entityId, productId],
+      orderBy: 'title',
+    );
     return rows.map(ProductSpecification.fromSql).toList(growable: false);
   }
 
-  Future<String> addProductSpecification({required String productId, required String title, required String value}) async {
-    if (title.trim().isEmpty || value.trim().isEmpty) throw ArgumentError('Specification title and value are required');
+  Future<String> addProductSpecification({
+    required String productId,
+    required String title,
+    required String value,
+  }) async {
+    if (title.trim().isEmpty || value.trim().isEmpty)
+      throw ArgumentError('Specification title and value are required');
     final ctx = await LocalContextService.instance.current;
     final id = uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -290,7 +423,6 @@ ORDER BY b.code
         'created_at': now,
         'updated_at': now,
       });
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'product_specification', aggregateId: id, action: 'create', payload: {'id': id, 'product_id': productId, 'title': title.trim(), 'value': value.trim()});
     });
     return id;
   }
@@ -298,7 +430,12 @@ ORDER BY b.code
   Future<List<Warehouse>> listWarehouses() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('warehouses', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query(
+      'warehouses',
+      where: 'entity_id = ? AND deleted_at IS NULL',
+      whereArgs: [ctx.entityId],
+      orderBy: 'name',
+    );
     return rows.map(Warehouse.fromSql).toList(growable: false);
   }
 
@@ -308,11 +445,33 @@ ORDER BY b.code
     final warehouseId = id ?? uuid.v4();
     await _database.transaction((txn) async {
       if (id == null) {
-        await txn.insert('warehouses', {'id': warehouseId, 'entity_id': ctx.entityId, 'name': name.trim(), 'created_at': now, 'updated_at': now});
+        await txn.insert('warehouses', {
+          'id': warehouseId,
+          'entity_id': ctx.entityId,
+          'name': name.trim(),
+          'created_at': now,
+          'updated_at': now,
+        });
       } else {
-        await txn.update('warehouses', {'name': name.trim(), 'updated_at': now, 'version': await _nextVersion(txn, 'warehouses', warehouseId)}, where: 'id = ? AND entity_id = ?', whereArgs: [warehouseId, ctx.entityId]);
+        await txn.update(
+          'warehouses',
+          {
+            'name': name.trim(),
+            'updated_at': now,
+            'version': await _nextVersion(txn, 'warehouses', warehouseId),
+          },
+          where: 'id = ? AND entity_id = ?',
+          whereArgs: [warehouseId, ctx.entityId],
+        );
       }
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'warehouse', aggregateId: warehouseId, action: id == null ? 'create' : 'update', payload: {'id': warehouseId, 'name': name.trim()});
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'warehouse',
+        warehouseId,
+        id == null ? 'WarehouseCreated' : 'WarehouseUpdated',
+        now,
+      );
     });
     return warehouseId;
   }
@@ -320,12 +479,22 @@ ORDER BY b.code
   Future<List<FinancialYear>> listFinancialYears() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('financial_years', where: 'entity_id = ?', whereArgs: [ctx.entityId], orderBy: 'starts_on DESC');
+    final rows = await db.query(
+      'financial_years',
+      where: 'entity_id = ?',
+      whereArgs: [ctx.entityId],
+      orderBy: 'starts_on DESC',
+    );
     return rows.map(FinancialYear.fromSql).toList(growable: false);
   }
 
-  Future<String> createFinancialYear({required String name, required DateTime startsOn, required DateTime endsOn}) async {
-    if (!endsOn.isAfter(startsOn)) throw ArgumentError('Financial year end must be after start');
+  Future<String> createFinancialYear({
+    required String name,
+    required DateTime startsOn,
+    required DateTime endsOn,
+  }) async {
+    if (!endsOn.isAfter(startsOn))
+      throw ArgumentError('Financial year end must be after start');
     final ctx = await LocalContextService.instance.current;
     final id = uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -340,7 +509,6 @@ ORDER BY b.code
         'created_at': now,
         'updated_at': now,
       });
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'financial_year', aggregateId: id, action: 'create', payload: {'id': id, 'name': name.trim(), 'starts_on': startsOn.toUtc().toIso8601String(), 'ends_on': endsOn.toUtc().toIso8601String()});
     });
     return id;
   }
@@ -348,47 +516,75 @@ ORDER BY b.code
   Future<void> activateFinancialYear(String id) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('financial_years', where: 'id=? AND entity_id=? AND is_open=1', whereArgs: [id, ctx.entityId], limit: 1);
+    final rows = await db.query(
+      'financial_years',
+      where: 'id=? AND entity_id=? AND is_open=1',
+      whereArgs: [id, ctx.entityId],
+      limit: 1,
+    );
     if (rows.isEmpty) throw StateError('Financial year must be open');
-    await db.update('app_context', {'financial_year_id': id, 'updated_at': DateTime.now().toUtc().toIso8601String()}, where: 'singleton=1');
+    await db.update('app_context', {
+      'financial_year_id': id,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, where: 'singleton=1');
     LocalContextService.instance.clearCache();
   }
 
   Future<void> closeFinancialYear(String id) async {
     final ctx = await LocalContextService.instance.current;
     if (id == ctx.financialYearId) {
-      throw StateError('Activate another open financial year before closing the current year');
+      throw StateError(
+        'Activate another open financial year before closing the current year',
+      );
     }
     final now = DateTime.now().toUtc().toIso8601String();
     await _database.transaction((txn) async {
-      final changed = await txn.update('financial_years', {
-        'is_open': 0,
-        'closed_at': now,
-        'closed_by': ctx.userId,
-        'updated_at': now,
-      }, where: 'id=? AND entity_id=? AND is_open=1', whereArgs: [id, ctx.entityId]);
+      final changed = await txn.update(
+        'financial_years',
+        {
+          'is_open': 0,
+          'closed_at': now,
+          'closed_by': ctx.userId,
+          'updated_at': now,
+        },
+        where: 'id=? AND entity_id=? AND is_open=1',
+        whereArgs: [id, ctx.entityId],
+      );
       if (changed == 0) throw StateError('Open financial year not found');
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'financial_year', aggregateId: id, action: 'close', payload: {'id': id, 'is_open': false, 'closed_at': now});
     });
   }
 
   Future<void> archiveWarehouse(String id) async {
     final ctx = await LocalContextService.instance.current;
-    if (id == ctx.defaultWarehouseId) throw StateError('Cannot archive the default warehouse');
+    if (id == ctx.defaultWarehouseId)
+      throw StateError('Cannot archive the default warehouse');
     final db = await _database.database;
-    final balances = await db.rawQuery('SELECT COUNT(*) c FROM inventory_items WHERE entity_id=? AND warehouse_id=? AND ABS(current_quantity) > 0.000001', [ctx.entityId, id]);
-    if ((balances.first['c'] as num).toInt() > 0) throw StateError('Warehouse has stock and cannot be archived');
+    final balances = await db.rawQuery(
+      'SELECT COUNT(*) c FROM inventory_items WHERE entity_id=? AND warehouse_id=? AND ABS(current_quantity) > 0.000001',
+      [ctx.entityId, id],
+    );
+    if ((balances.first['c'] as num).toInt() > 0)
+      throw StateError('Warehouse has stock and cannot be archived');
     final now = DateTime.now().toUtc().toIso8601String();
     await _database.transaction((txn) async {
-      await txn.update('warehouses', {'deleted_at': now, 'updated_at': now}, where: 'id=? AND entity_id=?', whereArgs: [id, ctx.entityId]);
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'warehouse', aggregateId: id, action: 'delete', payload: {'id': id, 'deleted_at': now});
+      await txn.update(
+        'warehouses',
+        {'deleted_at': now, 'updated_at': now},
+        where: 'id=? AND entity_id=?',
+        whereArgs: [id, ctx.entityId],
+      );
     });
   }
 
   Future<List<Cashbox>> listCashboxes() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.query('cashboxes', where: 'entity_id = ? AND deleted_at IS NULL', whereArgs: [ctx.entityId], orderBy: 'name');
+    final rows = await db.query(
+      'cashboxes',
+      where: 'entity_id = ? AND deleted_at IS NULL',
+      whereArgs: [ctx.entityId],
+      orderBy: 'name',
+    );
     return rows.map(Cashbox.fromSql).toList(growable: false);
   }
 
@@ -398,21 +594,167 @@ ORDER BY b.code
     final cashboxId = id ?? uuid.v4();
     await _database.transaction((txn) async {
       if (id == null) {
-        await txn.insert('cashboxes', {'id': cashboxId, 'entity_id': ctx.entityId, 'name': name.trim(), 'created_at': now, 'updated_at': now});
+        await txn.insert('cashboxes', {
+          'id': cashboxId,
+          'entity_id': ctx.entityId,
+          'name': name.trim(),
+          'created_at': now,
+          'updated_at': now,
+        });
       } else {
-        await txn.update('cashboxes', {'name': name.trim(), 'updated_at': now, 'version': await _nextVersion(txn, 'cashboxes', cashboxId)}, where: 'id = ? AND entity_id = ?', whereArgs: [cashboxId, ctx.entityId]);
+        await txn.update(
+          'cashboxes',
+          {
+            'name': name.trim(),
+            'updated_at': now,
+            'version': await _nextVersion(txn, 'cashboxes', cashboxId),
+          },
+          where: 'id = ? AND entity_id = ?',
+          whereArgs: [cashboxId, ctx.entityId],
+        );
       }
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'cashbox', aggregateId: cashboxId, action: id == null ? 'create' : 'update', payload: {'id': cashboxId, 'name': name.trim()});
+      if (id == null) {
+        await _enqueueMaster(
+          txn,
+          ctx.entityId,
+          'cashbox',
+          cashboxId,
+          'CashboxCreated',
+          now,
+        );
+      }
     });
     return cashboxId;
   }
 
-  Future<int> _nextVersion(dynamic db, String table, String id) async {
-    final rows = await db.query(table, columns: ['version'], where: 'id = ?', whereArgs: [id], limit: 1);
-    return ((rows.firstOrNull?['version'] as num?)?.toInt() ?? 0) + 1;
+  Future<void> _enqueueMaster(
+    DatabaseExecutor db,
+    String entityId,
+    String aggregateType,
+    String aggregateId,
+    String eventType,
+    String occurredAt,
+  ) async {
+    final table = switch (aggregateType) {
+      'party' => 'parties',
+      'category' => 'categories',
+      'product' => 'products',
+      'product_unit' => 'product_units',
+      'barcode' => 'barcodes',
+      'warehouse' => 'warehouses',
+      'cashbox' => 'cashboxes',
+      _ => throw ArgumentError('Unsupported catalog aggregate $aggregateType'),
+    };
+    final rows = await db.query(
+      table,
+      where: 'id=? AND entity_id=?',
+      whereArgs: [aggregateId, entityId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw StateError('$table record not found');
+    final row = rows.single;
+    final payload = switch (aggregateType) {
+      'party' => <String, Object?>{
+        'id': aggregateId,
+        'name': row['name'],
+        'type': (row['type'] as String).toUpperCase(),
+        'phone': row['phone'],
+        'email': null,
+        'address': null,
+        'taxNumber': null,
+        'openingBalanceMinor': 0,
+        'creditLimitMinor': null,
+        'active': row['deleted_at'] == null,
+        'updatedAt': row['updated_at'],
+      },
+      'category' => <String, Object?>{
+        'id': aggregateId,
+        'name': row['name'],
+        'updatedAt': row['updated_at'],
+      },
+      'product' => <String, Object?>{
+        'id': aggregateId,
+        'categoryId': row['category_id'],
+        'name': row['name'],
+        'minQuantity': row['min_quantity'],
+        'active': row['deleted_at'] == null,
+        'updatedAt': row['updated_at'],
+      },
+      'product_unit' => <String, Object?>{
+        'id': aggregateId,
+        'productId': row['product_id'],
+        'name': row['name'],
+        'factor': row['factor'],
+        'primary': row['is_primary'] == 1,
+        'updatedAt': row['updated_at'],
+      },
+      'barcode' => <String, Object?>{
+        'id': aggregateId,
+        'productUnitId': row['product_unit_id'],
+        'code': row['code'],
+        'createdAt': row['created_at'],
+      },
+      'warehouse' => <String, Object?>{
+        'id': aggregateId,
+        'name': row['name'],
+        'active': row['deleted_at'] == null,
+        'updatedAt': row['updated_at'],
+      },
+      'cashbox' => <String, Object?>{
+        'id': aggregateId,
+        'name': row['name'],
+        'createdAt': row['created_at'],
+      },
+      _ => throw StateError('Unreachable aggregate'),
+    };
+    await _outbox.enqueueEvent(
+      db,
+      entityId: entityId,
+      aggregateType: aggregateType,
+      aggregateId: aggregateId,
+      eventType: eventType,
+      aggregateVersion: (row['version'] as num).toInt(),
+      occurredAt: DateTime.parse(occurredAt),
+      payload: payload,
+    );
   }
-}
 
-extension _FirstOrNull<T> on List<T> {
-  T? get firstOrNull => isEmpty ? null : first;
+  Future<void> _enqueueDeleted(
+    DatabaseExecutor db,
+    String entityId,
+    String aggregateType,
+    String aggregateId,
+    String eventType,
+    String deletedAt,
+  ) async {
+    final table = aggregateType == 'party' ? 'parties' : 'categories';
+    final rows = await db.query(
+      table,
+      columns: ['version'],
+      where: 'id=?',
+      whereArgs: [aggregateId],
+      limit: 1,
+    );
+    await _outbox.enqueueEvent(
+      db,
+      entityId: entityId,
+      aggregateType: aggregateType,
+      aggregateId: aggregateId,
+      eventType: eventType,
+      aggregateVersion: (rows.single['version'] as num).toInt() + 1,
+      occurredAt: DateTime.parse(deletedAt),
+      payload: {'id': aggregateId, 'deletedAt': deletedAt},
+    );
+  }
+
+  Future<int> _nextVersion(dynamic db, String table, String id) async {
+    final rows = await db.query(
+      table,
+      columns: ['version'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return (((rows.isEmpty ? null : rows.first['version']) as num?)?.toInt() ?? 0) + 1;
+  }
 }

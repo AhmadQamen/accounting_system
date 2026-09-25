@@ -13,11 +13,15 @@ class InventoryRepository {
   final _ledger = const InventoryLedgerService();
   final _outbox = const OutboxService();
 
-  Future<List<InventoryItem>> listInventory({String search = '', String? warehouseId}) async {
+  Future<List<InventoryItem>> listInventory({
+    String search = '',
+    String? warehouseId,
+  }) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final args = <Object?>[ctx.entityId];
-    var filter = 'i.entity_id = ? AND p.deleted_at IS NULL AND w.deleted_at IS NULL';
+    var filter =
+        'i.entity_id = ? AND p.deleted_at IS NULL AND w.deleted_at IS NULL';
     if (warehouseId != null) {
       filter += ' AND i.warehouse_id = ?';
       args.add(warehouseId);
@@ -42,7 +46,10 @@ ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
     return rows.map(InventoryItem.fromSql).toList(growable: false);
   }
 
-  Future<List<SellableProduct>> listSellableProducts({String search = '', String? warehouseId}) async {
+  Future<List<SellableProduct>> listSellableProducts({
+    String search = '',
+    String? warehouseId,
+  }) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final warehouse = warehouseId ?? ctx.defaultWarehouseId;
@@ -55,7 +62,8 @@ ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
       args.add('%${search.trim()}%');
       args.add('%${search.trim()}%');
     }
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT p.id AS product_id, p.name AS product_name,
        u.id AS product_unit_id, u.name AS unit_name, u.factor,
        i.id AS inventory_item_id, COALESCE(i.current_quantity,0) AS current_quantity,
@@ -65,10 +73,11 @@ JOIN product_units u ON u.product_id=p.id AND u.is_primary=1 AND u.deleted_at IS
 LEFT JOIN inventory_items i ON i.product_id=p.id AND i.warehouse_id=?
 WHERE p.entity_id=? AND p.deleted_at IS NULL $searchFilter
 ORDER BY p.name COLLATE NOCASE
-''', [warehouse, ctx.entityId, ...args.skip(2)]);
+''',
+      [warehouse, ctx.entityId, ...args.skip(2)],
+    );
     return rows.map(SellableProduct.fromSql).toList(growable: false);
   }
-
 
   Future<String> ensureInventoryItemForProduct({
     required String productId,
@@ -92,19 +101,6 @@ ORDER BY p.name COLLATE NOCASE
         productId: productId,
         warehouseId: warehouseId,
       );
-      await _outbox.enqueue(
-        txn,
-        entityId: ctx.entityId,
-        aggregateType: 'inventory_item',
-        aggregateId: id,
-        action: 'create',
-        payload: {
-          'id': id,
-          'entity_id': ctx.entityId,
-          'product_id': productId,
-          'warehouse_id': warehouseId,
-        },
-      );
     });
     return id;
   }
@@ -119,8 +115,23 @@ ORDER BY p.name COLLATE NOCASE
     final ctx = await LocalContextService.instance.current;
     final referenceId = uuid.v4();
     await _database.transaction((txn) async {
-      final inventoryItemId = await _ledger.ensureInventoryItem(txn, entityId: ctx.entityId, productId: productId, warehouseId: warehouseId);
-      await _ledger.recordMovement(
+      final inventoryItemId = await _ledger.ensureInventoryItem(
+        txn,
+        entityId: ctx.entityId,
+        productId: productId,
+        warehouseId: warehouseId,
+      );
+      final units = await txn.query(
+        'product_units',
+        columns: ['id', 'factor'],
+        where: 'product_id=? AND is_primary=1 AND deleted_at IS NULL',
+        whereArgs: [productId],
+        limit: 1,
+      );
+      if (units.isEmpty) throw StateError('Primary product unit not found');
+      final unitId = units.single['id'] as String;
+      final factor = (units.single['factor'] as num).toDouble();
+      final movementId = await _ledger.recordMovement(
         txn,
         entityId: ctx.entityId,
         financialYearId: ctx.financialYearId,
@@ -133,7 +144,36 @@ ORDER BY p.name COLLATE NOCASE
         createdBy: ctx.userId,
         originDeviceId: ctx.deviceId,
       );
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'inventory_opening', aggregateId: referenceId, action: 'post', payload: {'id': referenceId, 'product_id': productId, 'warehouse_id': warehouseId, 'quantity': quantity, 'value_minor': totalValueMinor});
+      await _outbox.enqueueEvent(
+        txn,
+        entityId: ctx.entityId,
+        aggregateType: 'inventory_opening',
+        aggregateId: referenceId,
+        eventType: 'InventoryOpeningPosted',
+        aggregateVersion: 1,
+        occurredAt: DateTime.now().toUtc(),
+        payload: {
+          'openingId': referenceId,
+          'financialYearId': ctx.financialYearId,
+          'warehouseId': warehouseId,
+          'items': [
+            {
+              'movementId': movementId,
+              'inventoryItemId': inventoryItemId,
+              'productId': productId,
+              'productUnitId': unitId,
+              'quantity': quantity,
+              'unitFactor': factor,
+              'baseQuantity': quantity * factor,
+              'unitCostMinor': Money.divideByQuantity(
+                totalValueMinor,
+                quantity,
+              ),
+              'valueMinor': totalValueMinor,
+            },
+          ],
+        },
+      );
     });
     return referenceId;
   }
@@ -147,8 +187,10 @@ ORDER BY p.name COLLATE NOCASE
     final ctx = await LocalContextService.instance.current;
     final id = uuid.v4();
     final now = DateTime.now().toUtc();
-    final number = 'ADJ-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
+    final number =
+        'ADJ-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
     await _database.transaction((txn) async {
+      final payloadItems = <Map<String, Object?>>[];
       await txn.insert('inventory_adjustments', {
         'id': id,
         'entity_id': ctx.entityId,
@@ -164,12 +206,25 @@ ORDER BY p.name COLLATE NOCASE
         'updated_at': now.toIso8601String(),
       });
       for (final input in items) {
-        final rows = await txn.query('inventory_items', where: 'id = ?', whereArgs: [input.inventoryItemId], limit: 1);
+        final rows = await txn.query(
+          'inventory_items',
+          where: 'id = ?',
+          whereArgs: [input.inventoryItemId],
+          limit: 1,
+        );
         if (rows.isEmpty) throw StateError('Inventory item not found');
         final before = (rows.first['current_quantity'] as num).toDouble();
         final delta = input.countedQuantity - before;
-        final average = before == 0 ? 0 : Money.divideByQuantity((rows.first['inventory_value_minor'] as num).toInt(), before);
-        final valueDelta = Money.multiplyByQuantity(average, delta.abs()) * (delta < 0 ? -1 : 1);
+        final average =
+            before == 0
+                ? 0
+                : Money.divideByQuantity(
+                  (rows.first['inventory_value_minor'] as num).toInt(),
+                  before,
+                );
+        final valueDelta =
+            Money.multiplyByQuantity(average, delta.abs()) *
+            (delta < 0 ? -1 : 1);
         final itemId = uuid.v4();
         await txn.insert('inventory_adjustment_items', {
           'id': itemId,
@@ -184,24 +239,59 @@ ORDER BY p.name COLLATE NOCASE
           'value_delta_minor': valueDelta,
           'created_at': now.toIso8601String(),
         });
-        if (delta != 0) {
-          await _ledger.recordMovement(txn,
-              entityId: ctx.entityId,
-              financialYearId: ctx.financialYearId,
-              inventoryItemId: input.inventoryItemId,
-              movementType: 'adjustment',
-              quantityDelta: delta,
-              valueDeltaMinor: valueDelta,
-              referenceType: 'inventory_adjustment',
-              referenceId: id,
-              referenceItemId: itemId,
-              createdBy: ctx.userId,
-              originDeviceId: ctx.deviceId,
-              occurredAt: now);
-        }
+        final movementId = await _ledger.recordMovement(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          inventoryItemId: input.inventoryItemId,
+          movementType: 'adjustment',
+          quantityDelta: delta,
+          valueDeltaMinor: valueDelta,
+          referenceType: 'inventory_adjustment',
+          referenceId: id,
+          referenceItemId: itemId,
+          createdBy: ctx.userId,
+          originDeviceId: ctx.deviceId,
+          occurredAt: now,
+        );
+        payloadItems.add({
+          'movementId': movementId,
+          'inventoryItemId': input.inventoryItemId,
+          'productUnitId': input.productUnitId,
+          'quantityBefore': before,
+          'countedQuantity': input.countedQuantity,
+          'quantityDelta': delta,
+          'unitFactor': input.unitFactor,
+          'valueDeltaMinor': valueDelta,
+        });
       }
-      await txn.update('inventory_adjustments', {'status': 'posted', 'posted_at': now.toIso8601String(), 'updated_at': now.toIso8601String()}, where: 'id = ?', whereArgs: [id]);
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'inventory_adjustment', aggregateId: id, action: 'post', payload: {'id': id, 'number': number, 'items': items.map((e) => e.toJson()).toList()});
+      await txn.update(
+        'inventory_adjustments',
+        {
+          'status': 'posted',
+          'posted_at': now.toIso8601String(),
+          'updated_at': now.toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _outbox.enqueueEvent(
+        txn,
+        entityId: ctx.entityId,
+        aggregateType: 'inventory_adjustment',
+        aggregateId: id,
+        eventType: 'InventoryAdjusted',
+        aggregateVersion: 1,
+        occurredAt: now,
+        payload: {
+          'adjustmentId': id,
+          'adjustmentNumber': number,
+          'financialYearId': ctx.financialYearId,
+          'warehouseId': warehouseId,
+          'note': note,
+          'items': payloadItems,
+        },
+      );
     });
     return id;
   }
@@ -212,48 +302,155 @@ ORDER BY p.name COLLATE NOCASE
     required List<InventoryTransferInput> items,
     String? note,
   }) async {
-    if (fromWarehouseId == toWarehouseId) throw ArgumentError('Warehouses must differ');
+    if (fromWarehouseId == toWarehouseId)
+      throw ArgumentError('Warehouses must differ');
     if (items.isEmpty) throw ArgumentError('Transfer needs items');
     final ctx = await LocalContextService.instance.current;
     final id = uuid.v4();
     final now = DateTime.now().toUtc();
-    final number = 'TRF-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
+    final number =
+        'TRF-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
     await _database.transaction((txn) async {
+      final payloadItems = <Map<String, Object?>>[];
       await txn.insert('inventory_transfers', {
-        'id': id, 'entity_id': ctx.entityId, 'financial_year_id': ctx.financialYearId,
-        'transfer_number': number, 'from_warehouse_id': fromWarehouseId, 'to_warehouse_id': toWarehouseId,
-        'status': 'draft', 'note': note, 'created_by': ctx.userId, 'origin_device_id': ctx.deviceId,
-        'occurred_at': now.toIso8601String(), 'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String(),
+        'id': id,
+        'entity_id': ctx.entityId,
+        'financial_year_id': ctx.financialYearId,
+        'transfer_number': number,
+        'from_warehouse_id': fromWarehouseId,
+        'to_warehouse_id': toWarehouseId,
+        'status': 'draft',
+        'note': note,
+        'created_by': ctx.userId,
+        'origin_device_id': ctx.deviceId,
+        'occurred_at': now.toIso8601String(),
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
       });
       for (final input in items) {
-        final sourceId = await _ledger.ensureInventoryItem(txn, entityId: ctx.entityId, productId: input.productId, warehouseId: fromWarehouseId);
-        final destId = await _ledger.ensureInventoryItem(txn, entityId: ctx.entityId, productId: input.productId, warehouseId: toWarehouseId);
-        final sourceRows = await txn.query('inventory_items', where: 'id = ?', whereArgs: [sourceId], limit: 1);
-        final sourceQty = (sourceRows.first['current_quantity'] as num).toDouble();
-        if (sourceQty < input.baseQuantity) throw StateError('Insufficient stock for transfer');
-        final average = sourceQty == 0 ? 0 : Money.divideByQuantity((sourceRows.first['inventory_value_minor'] as num).toInt(), sourceQty);
+        final sourceId = await _ledger.ensureInventoryItem(
+          txn,
+          entityId: ctx.entityId,
+          productId: input.productId,
+          warehouseId: fromWarehouseId,
+        );
+        final destId = await _ledger.ensureInventoryItem(
+          txn,
+          entityId: ctx.entityId,
+          productId: input.productId,
+          warehouseId: toWarehouseId,
+        );
+        final sourceRows = await txn.query(
+          'inventory_items',
+          where: 'id = ?',
+          whereArgs: [sourceId],
+          limit: 1,
+        );
+        final sourceQty =
+            (sourceRows.first['current_quantity'] as num).toDouble();
+        if (sourceQty < input.baseQuantity)
+          throw StateError('Insufficient stock for transfer');
+        final average =
+            sourceQty == 0
+                ? 0
+                : Money.divideByQuantity(
+                  (sourceRows.first['inventory_value_minor'] as num).toInt(),
+                  sourceQty,
+                );
         final value = Money.multiplyByQuantity(average, input.baseQuantity);
         final itemId = uuid.v4();
         await txn.insert('inventory_transfer_items', {
-          'id': itemId, 'entity_id': ctx.entityId, 'inventory_transfer_id': id,
-          'product_id': input.productId, 'product_unit_id': input.productUnitId,
-          'quantity': input.quantity, 'unit_factor_at_transfer': input.unitFactor,
-          'base_quantity': input.baseQuantity, 'inventory_value_minor': value,
+          'id': itemId,
+          'entity_id': ctx.entityId,
+          'inventory_transfer_id': id,
+          'product_id': input.productId,
+          'product_unit_id': input.productUnitId,
+          'quantity': input.quantity,
+          'unit_factor_at_transfer': input.unitFactor,
+          'base_quantity': input.baseQuantity,
+          'inventory_value_minor': value,
           'created_at': now.toIso8601String(),
         });
-        await _ledger.recordMovement(txn, entityId: ctx.entityId, financialYearId: ctx.financialYearId, inventoryItemId: sourceId, movementType: 'transfer_out', quantityDelta: -input.baseQuantity, valueDeltaMinor: -value, referenceType: 'inventory_transfer', referenceId: id, referenceItemId: itemId, createdBy: ctx.userId, originDeviceId: ctx.deviceId, occurredAt: now);
-        await _ledger.recordMovement(txn, entityId: ctx.entityId, financialYearId: ctx.financialYearId, inventoryItemId: destId, movementType: 'transfer_in', quantityDelta: input.baseQuantity, valueDeltaMinor: value, referenceType: 'inventory_transfer', referenceId: id, referenceItemId: itemId, createdBy: ctx.userId, originDeviceId: ctx.deviceId, occurredAt: now);
+        final outMovementId = await _ledger.recordMovement(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          inventoryItemId: sourceId,
+          movementType: 'transfer_out',
+          quantityDelta: -input.baseQuantity,
+          valueDeltaMinor: -value,
+          referenceType: 'inventory_transfer',
+          referenceId: id,
+          referenceItemId: itemId,
+          createdBy: ctx.userId,
+          originDeviceId: ctx.deviceId,
+          occurredAt: now,
+        );
+        final inMovementId = await _ledger.recordMovement(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          inventoryItemId: destId,
+          movementType: 'transfer_in',
+          quantityDelta: input.baseQuantity,
+          valueDeltaMinor: value,
+          referenceType: 'inventory_transfer',
+          referenceId: id,
+          referenceItemId: itemId,
+          createdBy: ctx.userId,
+          originDeviceId: ctx.deviceId,
+          occurredAt: now,
+        );
+        payloadItems.add({
+          'productId': input.productId,
+          'productUnitId': input.productUnitId,
+          'quantity': input.quantity,
+          'unitFactor': input.unitFactor,
+          'baseQuantity': input.baseQuantity,
+          'inventoryValueMinor': value,
+          'outMovementId': outMovementId,
+          'inMovementId': inMovementId,
+        });
       }
-      await txn.update('inventory_transfers', {'status': 'posted', 'posted_at': now.toIso8601String(), 'updated_at': now.toIso8601String()}, where: 'id = ?', whereArgs: [id]);
-      await _outbox.enqueue(txn, entityId: ctx.entityId, aggregateType: 'inventory_transfer', aggregateId: id, action: 'post', payload: {'id': id, 'number': number, 'from': fromWarehouseId, 'to': toWarehouseId, 'items': items.map((e) => e.toJson()).toList()});
+      await txn.update(
+        'inventory_transfers',
+        {
+          'status': 'posted',
+          'posted_at': now.toIso8601String(),
+          'updated_at': now.toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _outbox.enqueueEvent(
+        txn,
+        entityId: ctx.entityId,
+        aggregateType: 'inventory_transfer',
+        aggregateId: id,
+        eventType: 'InventoryTransferred',
+        aggregateVersion: 1,
+        occurredAt: now,
+        payload: {
+          'transferId': id,
+          'transferNumber': number,
+          'financialYearId': ctx.financialYearId,
+          'fromWarehouseId': fromWarehouseId,
+          'toWarehouseId': toWarehouseId,
+          'note': note,
+          'items': payloadItems,
+        },
+      );
     });
     return id;
   }
 
-  Future<List<InventoryMovement>> movementHistory({String? inventoryItemId}) async {
+  Future<List<InventoryMovement>> movementHistory({
+    String? inventoryItemId,
+  }) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT m.*, p.name AS product_name, w.name AS warehouse_name
 FROM inventory_movements m
 JOIN inventory_items i ON i.id=m.inventory_item_id
@@ -262,14 +459,19 @@ JOIN warehouses w ON w.id=i.warehouse_id
 WHERE m.entity_id=? ${inventoryItemId == null ? '' : 'AND m.inventory_item_id=?'}
 ORDER BY m.occurred_at DESC
 LIMIT 500
-''', inventoryItemId == null ? [ctx.entityId] : [ctx.entityId, inventoryItemId]);
+''',
+      inventoryItemId == null
+          ? [ctx.entityId]
+          : [ctx.entityId, inventoryItemId],
+    );
     return rows.map(InventoryMovement.fromSql).toList(growable: false);
   }
 
   Future<InventoryCacheVerification> verifyCache() async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final mismatches = await db.rawQuery('''
+    final mismatches = await db.rawQuery(
+      '''
 SELECT i.id, i.current_quantity,
        COALESCE(SUM(m.quantity_delta),0) AS ledger_quantity,
        i.inventory_value_minor,
@@ -280,7 +482,13 @@ WHERE i.entity_id=?
 GROUP BY i.id
 HAVING ABS(i.current_quantity - COALESCE(SUM(m.quantity_delta),0)) > 0.000001
     OR i.inventory_value_minor <> COALESCE(SUM(m.value_delta_minor),0)
-''', [ctx.entityId]);
-    return InventoryCacheVerification(ok: mismatches.isEmpty, mismatchCount: mismatches.length, details: jsonEncode(mismatches));
+''',
+      [ctx.entityId],
+    );
+    return InventoryCacheVerification(
+      ok: mismatches.isEmpty,
+      mismatchCount: mismatches.length,
+      details: jsonEncode(mismatches),
+    );
   }
 }

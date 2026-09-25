@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS product_units (
   name TEXT NOT NULL,
   factor REAL NOT NULL DEFAULT 1 CHECK(factor > 0),
   is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
+  sale_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(sale_price_minor >= 0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT,

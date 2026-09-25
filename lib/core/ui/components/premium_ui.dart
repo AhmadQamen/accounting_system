@@ -837,13 +837,3 @@ class MiniBars extends StatelessWidget {
     );
   }
 }
-
-List<Widget> _spaced(List<Widget> widgets, double gap) {
-  final out = <Widget>[];
-  for (var i = 0; i < widgets.length; i++) {
-    if (i > 0) out.add(SizedBox(width: gap));
-    out.add(widgets[i]);
-  }
-  return out;
-}
-
