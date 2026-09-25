@@ -1,6 +1,7 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
@@ -572,10 +573,7 @@ class CashScreen extends ConsumerWidget {
       }
       ref.read(dataRevisionProvider.notifier).state++;
     } catch (e) {
-      if (context.mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
+      if (context.mounted) CustomSnackBar.showErrorSnackbar('$e');
     }
   }
 
@@ -634,10 +632,7 @@ class CashScreen extends ConsumerWidget {
             );
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
-        if (context.mounted)
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     amount.dispose();
@@ -721,10 +716,7 @@ class CashScreen extends ConsumerWidget {
             );
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
-        if (context.mounted)
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     amount.dispose();
@@ -995,15 +987,12 @@ class CashScreen extends ConsumerWidget {
             locale: Localizations.localeOf(context).toString(),
             currencyCode: currency,
           );
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('المتوقع: $expected • الفرق: $difference')),
+          CustomSnackBar.showInfoSnackbar(
+            'المتوقع: $expected • الفرق: $difference',
           );
         }
       } catch (e) {
-        if (context.mounted)
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('$e')));
+        if (context.mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     counted.dispose();

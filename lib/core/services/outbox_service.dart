@@ -16,19 +16,9 @@ class OutboxService {
   }) async {
     final id = operationId ?? uuid.v4();
     if (action == 'draft') return id;
-    await db.insert('legacy_sync_quarantine', {
-      'operation_id': id,
-      'entity_id': entityId,
-      'aggregate_type': aggregateType,
-      'aggregate_id': aggregateId,
-      'legacy_action': action,
-      'payload_json': jsonEncode(payload),
-      'legacy_status': 'isolated',
-      'legacy_created_at': DateTime.now().toUtc().toIso8601String(),
-      'quarantine_reason': 'LEGACY_ACTION_HAS_NO_VERIFIED_EVENT_MAPPING',
-      'quarantined_at': DateTime.now().toUtc().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    return id;
+    throw UnsupportedError(
+      'Legacy sync actions are disabled; use a catalog domain event.',
+    );
   }
 
   Future<String> enqueueEvent(

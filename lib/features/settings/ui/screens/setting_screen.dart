@@ -3,6 +3,7 @@ import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/providers/sync_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/auth/domain/provider/auth_providers.dart';
 import 'package:accounting_system/features/settings/domain/provider/setting_prov.dart';
@@ -318,25 +319,16 @@ class SettingsScreen extends ConsumerWidget {
                                                     result.lastError == null &&
                                                     !result.deviceRevoked;
                                               } catch (e) {
-                                                if (context.mounted)
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text('$e'),
-                                                    ),
+                                                if (context.mounted) {
+                                                  CustomSnackBar.showErrorSnackbar(
+                                                    '$e',
                                                   );
+                                                }
                                               }
                                               if (context.mounted &&
                                                   completed) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'اكتملت المزامنة بنجاح.',
-                                                    ),
-                                                  ),
+                                                CustomSnackBar.showSuccessSnackbar(
+                                                  'اكتملت المزامنة بنجاح.',
                                                 );
                                               }
                                               ref.invalidate(

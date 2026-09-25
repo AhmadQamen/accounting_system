@@ -11,6 +11,9 @@ abstract final class ApiEndpoints {
   static String registerDevice(String entityId) =>
       '/entities/${Uri.encodeComponent(entityId)}/devices/register';
 
+  static String organizationMembers(String entityId) =>
+      '/entities/${Uri.encodeComponent(entityId)}/members';
+
   static const syncBootstrap = '/sync/bootstrap';
   static const syncPush = '/sync/push';
   static const syncPull = '/sync/pull';

@@ -1,6 +1,31 @@
 import 'package:accounting_system/core/configs/unset.dart';
 import 'package:accounting_system/core/models/model_parsers.dart';
 
+enum SyncStage { idle, pushing, pulling, applying }
+
+class SyncOperation {
+  const SyncOperation({
+    required this.eventId,
+    required this.eventType,
+    required this.createdAt,
+    required this.status,
+    required this.attemptCount,
+    this.errorMessage,
+    this.payloadJson,
+  });
+
+  final String eventId;
+  final String eventType;
+  final DateTime createdAt;
+  final String status;
+  final int attemptCount;
+  final String? errorMessage;
+  final String? payloadJson;
+
+  bool get isFailed => status == 'failed' || status == 'rejected';
+  bool get isDone => status == 'accepted';
+}
+
 class SyncStatus {
   final int pending;
   final int conflicts;
@@ -10,6 +35,7 @@ class SyncStatus {
   final bool deviceRevoked;
   final int quarantinedLegacyOperations;
   final int rejected;
+  final int failed;
   final String? lastError;
   final bool initializationComplete;
 
@@ -22,6 +48,7 @@ class SyncStatus {
     this.deviceRevoked = false,
     this.quarantinedLegacyOperations = 0,
     this.rejected = 0,
+    this.failed = 0,
     this.lastError,
     this.initializationComplete = false,
   });
@@ -35,6 +62,7 @@ class SyncStatus {
     deviceRevoked: boolValue(row['device_revoked']),
     quarantinedLegacyOperations: intValue(row['quarantined_legacy_operations']),
     rejected: intValue(row['rejected']),
+    failed: intValue(row['failed']),
     lastError: row['last_error']?.toString(),
     initializationComplete: boolValue(row['initialization_complete']),
   );
@@ -53,6 +81,7 @@ class SyncStatus {
           json['quarantined_legacy_operations'],
     ),
     rejected: intValue(json['rejected']),
+    failed: intValue(json['failed']),
     lastError: (json['lastError'] ?? json['last_error'])?.toString(),
     initializationComplete: boolValue(
       json['initializationComplete'] ?? json['initialization_complete'],
@@ -68,6 +97,7 @@ class SyncStatus {
     'device_revoked': deviceRevoked ? 1 : 0,
     'quarantined_legacy_operations': quarantinedLegacyOperations,
     'rejected': rejected,
+    'failed': failed,
     'last_error': lastError,
     'initialization_complete': initializationComplete ? 1 : 0,
   };
@@ -81,6 +111,7 @@ class SyncStatus {
     'deviceRevoked': deviceRevoked,
     'quarantinedLegacyOperations': quarantinedLegacyOperations,
     'rejected': rejected,
+    'failed': failed,
     'lastError': lastError,
     'initializationComplete': initializationComplete,
   };
@@ -94,6 +125,7 @@ class SyncStatus {
     Object? deviceRevoked = unset,
     Object? quarantinedLegacyOperations = unset,
     Object? rejected = unset,
+    Object? failed = unset,
     Object? lastError = unset,
     Object? initializationComplete = unset,
   }) {
@@ -115,6 +147,7 @@ class SyncStatus {
               ? this.quarantinedLegacyOperations
               : quarantinedLegacyOperations as int,
       rejected: rejected is Unset ? this.rejected : rejected as int,
+      failed: failed is Unset ? this.failed : failed as int,
       lastError: lastError is Unset ? this.lastError : lastError as String?,
       initializationComplete:
           initializationComplete is Unset

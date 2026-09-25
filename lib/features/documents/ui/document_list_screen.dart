@@ -1,6 +1,7 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
@@ -434,15 +435,11 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
       }
       ref.read(dataRevisionProvider.notifier).state++;
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('تم الاعتماد محلياً')));
+        CustomSnackBar.showSuccessSnackbar('تم الاعتماد محلياً');
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        CustomSnackBar.showErrorSnackbar('$error');
       }
     }
   }
@@ -476,17 +473,13 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
           .voidDocument(widget.kind.dbType, documentId);
       ref.read(dataRevisionProvider.notifier).state++;
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تم إلغاء المستند وإنشاء الحركات العكسية محلياً'),
-          ),
+        CustomSnackBar.showSuccessSnackbar(
+          'تم إلغاء المستند وإنشاء الحركات العكسية محلياً',
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        CustomSnackBar.showErrorSnackbar('$error');
       }
     }
   }
@@ -504,9 +497,7 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     if (!context.mounted) return;
 
     if (originals.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا توجد فواتير معتمدة للإرجاع')),
-      );
+      CustomSnackBar.showWarningSnackbar('لا توجد فواتير معتمدة للإرجاع');
       return;
     }
 
@@ -674,10 +665,8 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
 
       if (returnLines.isEmpty) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('أدخل كمية إرجاع لبند واحد على الأقل'),
-            ),
+          CustomSnackBar.showWarningSnackbar(
+            'أدخل كمية إرجاع لبند واحد على الأقل',
           );
         }
       } else {
@@ -702,15 +691,11 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
           }
           ref.read(dataRevisionProvider.notifier).state++;
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('تم اعتماد المرتجع محلياً')),
-            );
+            CustomSnackBar.showSuccessSnackbar('تم اعتماد المرتجع محلياً');
           }
         } catch (error) {
           if (context.mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('$error')));
+            CustomSnackBar.showErrorSnackbar('$error');
           }
         }
       }

@@ -27,6 +27,8 @@ enum RouteType {
   cashSessions,
   financialYears,
   reports,
+  sync,
+  organizationMembers,
   settings,
 }
 
@@ -53,6 +55,8 @@ extension RouteTypeExtension on RouteType {
     RouteType.cashSessions => 'جلسات الصندوق',
     RouteType.financialYears => 'السنوات المالية',
     RouteType.reports => 'التقارير',
+    RouteType.sync => 'المزامنة',
+    RouteType.organizationMembers => 'أعضاء المؤسسة',
     RouteType.settings => 'الإعدادات',
   };
 }

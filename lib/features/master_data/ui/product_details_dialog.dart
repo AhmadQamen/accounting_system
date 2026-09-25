@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
@@ -10,7 +11,8 @@ class ProductDetailsDialog extends ConsumerStatefulWidget {
   final Product product;
 
   @override
-  ConsumerState<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
+  ConsumerState<ProductDetailsDialog> createState() =>
+      _ProductDetailsDialogState();
 }
 
 class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
@@ -35,7 +37,10 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
-                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -47,7 +52,8 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                     if (snapshot.connectionState != ConnectionState.done) {
                       return const Center(child: CircularProgressIndicator());
                     }
-                    if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
+                    if (snapshot.hasError)
+                      return Center(child: Text('${snapshot.error}'));
                     final data = snapshot.data!;
                     final units = data.units;
                     final barcodes = data.barcodes;
@@ -57,7 +63,9 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                         _sectionHeader('الوحدات', () => _addUnit(productId)),
                         ...units.map(
                           (u) => ListTile(
-                            leading: Icon(u.isPrimary ? Icons.star : Icons.straighten),
+                            leading: Icon(
+                              u.isPrimary ? Icons.star : Icons.straighten,
+                            ),
                             title: Text(u.name),
                             subtitle: Text(
                               'عامل التحويل: ${u.factor} • سعر البيع: ${_moneyInput(u.salePriceMinor)}',
@@ -65,7 +73,8 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                if (u.isPrimary) const Chip(label: Text('رئيسية')),
+                                if (u.isPrimary)
+                                  const Chip(label: Text('رئيسية')),
                                 IconButton(
                                   tooltip: 'تعديل الوحدة والسعر',
                                   onPressed: () => _editUnit(u),
@@ -76,13 +85,40 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                           ),
                         ),
                         const Divider(),
-                        _sectionHeader('الباركود', units.isEmpty ? null : () => _addBarcode(units)),
-                        if (barcodes.isEmpty) const ListTile(title: Text('لا توجد باركودات')),
-                        ...barcodes.map((b) => ListTile(leading: const Icon(Icons.qr_code), title: Text(b.code), subtitle: Text(b.unitName ?? ''))),
+                        _sectionHeader(
+                          'الباركود',
+                          units.isEmpty ? null : () => _addBarcode(units),
+                        ),
+                        if (barcodes.isEmpty)
+                          const ListTile(title: Text('لا توجد باركودات')),
+                        ...barcodes.map(
+                          (b) => ListTile(
+                            leading: const Icon(Icons.qr_code),
+                            title: Text(b.code),
+                            subtitle: Text(b.unitName ?? ''),
+                          ),
+                        ),
                         const Divider(),
-                        _sectionHeader('المواصفات', () => _addSpecification(productId)),
-                        if (specs.isEmpty) const ListTile(title: Text('لا توجد مواصفات')),
-                        ...specs.map((s) => ListTile(title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(s.value, maxLines: 3, overflow: TextOverflow.ellipsis))),
+                        _sectionHeader(
+                          'المواصفات',
+                          () => _addSpecification(productId),
+                        ),
+                        if (specs.isEmpty)
+                          const ListTile(title: Text('لا توجد مواصفات')),
+                        ...specs.map(
+                          (s) => ListTile(
+                            title: Text(
+                              s.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              s.value,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
                       ],
                     );
                   },
@@ -96,14 +132,23 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
   }
 
   Widget _sectionHeader(String title, VoidCallback? onAdd) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
-            if (onAdd != null) IconButton(onPressed: onAdd, icon: const Icon(Icons.add_circle_outline)),
-          ],
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+          ),
         ),
-      );
+        if (onAdd != null)
+          IconButton(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_circle_outline),
+          ),
+      ],
+    ),
+  );
 
   Future<ProductDetailsData> _load(String productId) async {
     final repo = ref.read(masterDataRepositoryProvider);
@@ -117,14 +162,11 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     );
   }
 
-  Future<void> _addUnit(String productId) => _showUnitEditor(
-        productId: productId,
-      );
+  Future<void> _addUnit(String productId) =>
+      _showUnitEditor(productId: productId);
 
-  Future<void> _editUnit(ProductUnit unit) => _showUnitEditor(
-        productId: unit.productId,
-        existing: unit,
-      );
+  Future<void> _editUnit(ProductUnit unit) =>
+      _showUnitEditor(productId: unit.productId, existing: unit);
 
   Future<void> _showUnitEditor({
     required String productId,
@@ -140,46 +182,70 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     var primary = existing?.isPrimary ?? false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text(existing == null ? 'إضافة وحدة' : 'تعديل الوحدة'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: name, decoration: const InputDecoration(labelText: 'اسم الوحدة')),
-                const SizedBox(height: 8),
-                TextField(controller: factor, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'عامل التحويل للوحدة الرئيسية')),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: salePrice,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: Text(existing == null ? 'إضافة وحدة' : 'تعديل الوحدة'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: name,
+                          decoration: const InputDecoration(
+                            labelText: 'اسم الوحدة',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: factor,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'عامل التحويل للوحدة الرئيسية',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: salePrice,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'سعر البيع',
+                          ),
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: primary,
+                          onChanged:
+                              existing?.isPrimary == true
+                                  ? null
+                                  : (v) => setLocal(() => primary = v ?? false),
+                          title: const Text('اجعلها الوحدة الرئيسية'),
+                        ),
+                      ],
+                    ),
                   ),
-                  decoration: const InputDecoration(labelText: 'سعر البيع'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('حفظ'),
+                    ),
+                  ],
                 ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: primary,
-                  onChanged: existing?.isPrimary == true
-                      ? null
-                      : (v) => setLocal(() => primary = v ?? false),
-                  title: const Text('اجعلها الوحدة الرئيسية'),
-                ),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('حفظ')),
-          ],
-        ),
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(masterDataRepositoryProvider).saveProductUnit(
+        await ref
+            .read(masterDataRepositoryProvider)
+            .saveProductUnit(
               productId: productId,
               id: existing?.id,
               name: name.text,
@@ -190,7 +256,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
         setState(() => revision++);
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     name.dispose();
@@ -213,41 +279,66 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     final code = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: const Text('إضافة باركود'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: unitId,
-                  items: units.map((u) => DropdownMenuItem(value: u.id!, child: Text(u.name))).toList(),
-                  onChanged: (v) {
-                    if (v != null) setLocal(() => unitId = v);
-                  },
-                  decoration: const InputDecoration(labelText: 'الوحدة'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: const Text('إضافة باركود'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: unitId,
+                          items:
+                              units
+                                  .map(
+                                    (u) => DropdownMenuItem(
+                                      value: u.id!,
+                                      child: Text(u.name),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (v) {
+                            if (v != null) setLocal(() => unitId = v);
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'الوحدة',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: code,
+                          decoration: const InputDecoration(
+                            labelText: 'الباركود',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('حفظ'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: code, decoration: const InputDecoration(labelText: 'الباركود')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('حفظ')),
-          ],
-        ),
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(masterDataRepositoryProvider).addBarcode(productUnitId: unitId, code: code.text);
+        await ref
+            .read(masterDataRepositoryProvider)
+            .addBarcode(productUnitId: unitId, code: code.text);
         setState(() => revision++);
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     code.dispose();
@@ -258,32 +349,51 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     final value = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إضافة مواصفة'),
-        content: SizedBox(
-          width: responsiveDialogWidth(context, 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: title, decoration: const InputDecoration(labelText: 'العنوان')),
-              const SizedBox(height: 8),
-              TextField(controller: value, decoration: const InputDecoration(labelText: 'القيمة')),
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('إضافة مواصفة'),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: title,
+                    decoration: const InputDecoration(labelText: 'العنوان'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: value,
+                    decoration: const InputDecoration(labelText: 'القيمة'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('حفظ'),
+              ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('حفظ')),
-        ],
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(masterDataRepositoryProvider).addProductSpecification(productId: productId, title: title.text, value: value.text);
+        await ref
+            .read(masterDataRepositoryProvider)
+            .addProductSpecification(
+              productId: productId,
+              title: title.text,
+              value: value.text,
+            );
         setState(() => revision++);
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     title.dispose();
