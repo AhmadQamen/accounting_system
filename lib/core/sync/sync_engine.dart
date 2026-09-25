@@ -39,13 +39,15 @@ class SyncEngine {
     DomainEventProjector? projector,
     Future<Database> Function()? databaseProvider,
     Future<LocalContext> Function()? contextProvider,
+    void Function(SyncStage stage)? onStageChanged,
   }) : _transport = transport,
        _databaseProvider =
            databaseProvider ??
            (() => (database ?? AppDatabase.instance).database),
        _contextProvider =
            contextProvider ?? (() => LocalContextService.instance.current),
-       _projector = projector ?? const SqliteDomainEventProjector();
+       _projector = projector ?? const SqliteDomainEventProjector(),
+       _onStageChanged = onStageChanged;
 
   static const pushBatchSize = 100;
   static const pullBatchSize = 500;
@@ -55,6 +57,7 @@ class SyncEngine {
   final Future<Database> Function() _databaseProvider;
   final Future<LocalContext> Function() _contextProvider;
   final DomainEventProjector _projector;
+  final void Function(SyncStage stage)? _onStageChanged;
 
   Future<SyncStatus> status() async {
     final context = await _contextProvider();
@@ -85,6 +88,7 @@ class SyncEngine {
     try {
       await future;
     } finally {
+      _onStageChanged?.call(SyncStage.idle);
       if (identical(_entitySyncs[context.entityId], future)) {
         _entitySyncs.remove(context.entityId);
       }
@@ -110,10 +114,13 @@ class SyncEngine {
       final initialized = state?['bootstrap_completed'] == 1;
       int? initializationTarget;
       if (!initialized || rebuild) {
+        _onStageChanged?.call(SyncStage.applying);
         initializationTarget = await _bootstrap(db, context, rebuild: rebuild);
       }
 
+      _onStageChanged?.call(SyncStage.pushing);
       await _pushOutbox(db, context);
+      _onStageChanged?.call(SyncStage.pulling);
       final finalCursor = await _pullAll(db, context);
       if (initializationTarget != null && finalCursor < initializationTarget) {
         throw IncompleteInitialSyncException(
@@ -151,6 +158,56 @@ class SyncEngine {
       await _recordSyncError(db, context.entityId, error.toString());
       rethrow;
     }
+  }
+
+  Future<List<SyncOperation>> operations() async {
+    final context = await _contextProvider();
+    final db = await _databaseProvider();
+    final rows = await db.rawQuery(
+      '''
+SELECT p.event_id, p.operation_type AS event_type, p.client_created_at AS created_at,
+       p.status, 0 AS attempt_count, p.error_message, c.payload_json
+FROM sync_operations p
+LEFT JOIN sync_changes c ON c.event_id=p.event_id
+WHERE p.entity_id=?
+UNION ALL
+SELECT o.event_id, o.event_type, o.created_at, o.status, o.attempt_count,
+       o.last_error AS error_message, o.payload_json
+FROM sync_outbox o
+WHERE o.entity_id=? AND NOT EXISTS (
+  SELECT 1 FROM sync_operations p WHERE p.event_id=o.event_id
+)
+ORDER BY created_at DESC
+''',
+      [context.entityId, context.entityId],
+    );
+    return rows
+        .map(
+          (row) => SyncOperation(
+            eventId: row['event_id']?.toString() ?? '',
+            eventType: row['event_type']?.toString() ?? '',
+            createdAt:
+                DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+                DateTime.fromMillisecondsSinceEpoch(0),
+            status: row['status']?.toString() ?? 'pending',
+            attemptCount: (row['attempt_count'] as num?)?.toInt() ?? 0,
+            errorMessage: row['error_message']?.toString(),
+            payloadJson: row['payload_json']?.toString(),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> retryOperation(String eventId) async {
+    final context = await _contextProvider();
+    final db = await _databaseProvider();
+    await db.update(
+      'sync_outbox',
+      {'status': 'pending', 'last_error': null, 'next_retry_at': null},
+      where:
+          'entity_id=? AND event_id=? AND status IN (\'failed\', \'rejected\')',
+      whereArgs: [context.entityId, eventId],
+    );
   }
 
   Future<int> _bootstrap(
@@ -367,6 +424,12 @@ class SyncEngine {
   }) async {
     final status = result.status.toUpperCase();
     final now = DateTime.now().toUtc().toIso8601String();
+    final operationStatus = switch (status) {
+      'ACCEPTED' || 'ALREADY_ACCEPTED' => 'accepted',
+      'CONFLICT' => 'conflict',
+      'REJECTED' => 'rejected',
+      _ => 'failed',
+    };
     await transaction.insert('sync_operations', {
       'id': event.eventId,
       'entity_id': context.entityId,
@@ -376,7 +439,7 @@ class SyncEngine {
       'operation_type': event.eventType,
       'client_created_at': event.occurredAt,
       'server_received_at': now,
-      'status': status,
+      'status': operationStatus,
       'error_message': result.errorMessage,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     switch (status) {
@@ -468,6 +531,9 @@ class SyncEngine {
           'Pull page contains an event beyond lastServerSequence.',
         );
       }
+      if (batch.events.isNotEmpty) {
+        _onStageChanged?.call(SyncStage.applying);
+      }
       await db.transaction((transaction) async {
         var previousNewSequence = cursor;
         for (final event in batch.events) {
@@ -533,6 +599,7 @@ class SyncEngine {
           whereArgs: [context.entityId],
         );
       });
+      _onStageChanged?.call(SyncStage.pulling);
       cursor = batch.lastServerSequence;
       if (!batch.hasMore) return cursor;
     }
@@ -551,17 +618,16 @@ class SyncEngine {
       "SELECT COUNT(*) c FROM sync_outbox WHERE entity_id=? AND status='rejected'",
       [entityId],
     );
+    final failed = await db.rawQuery(
+      "SELECT COUNT(*) c FROM sync_outbox WHERE entity_id=? AND status='failed'",
+      [entityId],
+    );
     final state = await _entityState(db, entityId);
     final cursor = await db.query(
       'sync_cursors',
       where: 'entity_id=?',
       whereArgs: [entityId],
       limit: 1,
-    );
-    final quarantine = await db.rawQuery(
-      "SELECT COUNT(*) c FROM legacy_sync_quarantine "
-      "WHERE review_status='pending_review' AND (entity_id=? OR entity_id IS NULL)",
-      [entityId],
     );
     return SyncStatus(
       pending: (pending.first['c'] as num).toInt(),
@@ -576,8 +642,9 @@ class SyncEngine {
               : ((cursor.first['server_sequence'] as num?) ?? 0).toInt(),
       backendConfigured: true,
       deviceRevoked: state?['device_revoked'] == 1,
-      quarantinedLegacyOperations: (quarantine.first['c'] as num).toInt(),
+      quarantinedLegacyOperations: 0,
       rejected: (rejected.first['c'] as num).toInt(),
+      failed: (failed.first['c'] as num).toInt(),
       lastError: state?['last_error']?.toString(),
       initializationComplete: state?['bootstrap_completed'] == 1,
     );

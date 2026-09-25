@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS organization_contexts (
 )
 ''',
   '''
+CREATE TABLE IF NOT EXISTS organization_members (
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  membership_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY(entity_id, membership_id)
+)
+''',
+  '''
 CREATE TABLE IF NOT EXISTS app_state (
   singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
   active_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
@@ -111,6 +123,7 @@ CREATE TABLE IF NOT EXISTS keyboard_shortcuts (
   'CREATE INDEX IF NOT EXISTS idx_users_entity ON users(entity_id)',
   'CREATE INDEX IF NOT EXISTS idx_devices_entity ON devices(entity_id)',
   'CREATE INDEX IF NOT EXISTS idx_organization_contexts_user ON organization_contexts(server_user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_organization_members_entity_name ON organization_members(entity_id, name, email)',
   'CREATE INDEX IF NOT EXISTS idx_financial_years_entity ON financial_years(entity_id)',
 ];
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:developer';
 import 'dart:io';
 
 import 'package:accounting_system/core/configs/api_config.dart';
@@ -35,7 +34,6 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final path = ApiConfig.requestPath(url);
-    log('API GET $path');
     final response = await _execute(
       (accessToken) => dio.get(
         path,
@@ -55,7 +53,6 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final path = ApiConfig.requestPath(url);
-    log('API POST $path');
 
     final response = await _execute(
       (accessToken) => dio.post(
@@ -78,7 +75,6 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final path = ApiConfig.requestPath(url);
-    log('API PUT $path');
     final response = await _execute(
       (accessToken) => dio.put(
         path,
@@ -98,7 +94,6 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final path = ApiConfig.requestPath(url);
-    log('API PATCH $path');
     final response = await _execute(
       (accessToken) => dio.patch(
         path,
@@ -118,7 +113,6 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final path = ApiConfig.requestPath(url);
-    log('API DELETE $path');
     final response = await _execute(
       (accessToken) => dio.delete(
         path,
@@ -149,12 +143,9 @@ class ApiClient {
     final resolvedToken = token ?? await getAccessToken?.call();
     try {
       final response = await request(resolvedToken);
-      log('API response status: ${response.statusCode}');
       _validateStatusCode(response);
       return response;
     } on DioException catch (e) {
-      log('API DioException: ${e.type} status: ${e.response?.statusCode}');
-
       // ForceUpdateException thrown by interceptor
       if (e.error is ForceUpdateException) {
         throw e.error as ForceUpdateException;

@@ -1,5 +1,6 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
@@ -20,7 +21,8 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final currency = ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final currency =
+        ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
     final partyId = widget.party.id!;
     return Dialog(
       child: ConstrainedBox(
@@ -32,8 +34,16 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text(widget.party.name, style: Theme.of(context).textTheme.headlineSmall)),
-                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                  Expanded(
+                    child: Text(
+                      widget.party.name,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -44,8 +54,10 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                   key: ValueKey(revision),
                   future: _summary(partyId),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-                    if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
+                    if (snapshot.connectionState != ConnectionState.done)
+                      return const Center(child: CircularProgressIndicator());
+                    if (snapshot.hasError)
+                      return Center(child: Text('${snapshot.error}'));
                     final data = snapshot.data!;
                     final balance = data.balanceMinor;
                     final ledger = data.ledger;
@@ -65,10 +77,26 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                   children: [
                                     const Text('الرصيد الحالي'),
                                     Text(
-                                      Money(balance).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency),
-                                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                                      Money(balance).format(
+                                        locale:
+                                            Localizations.localeOf(
+                                              context,
+                                            ).toString(),
+                                        currencyCode: currency,
+                                      ),
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.headlineSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                    Text(balance > 0 ? 'الطرف مدين لنا' : balance < 0 ? 'نحن مدينون للطرف' : 'الرصيد متعادل'),
+                                    Text(
+                                      balance > 0
+                                          ? 'الطرف مدين لنا'
+                                          : balance < 0
+                                          ? 'نحن مدينون للطرف'
+                                          : 'الرصيد متعادل',
+                                    ),
                                   ],
                                 ),
                                 Wrap(
@@ -91,38 +119,95 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text('كشف الحساب', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                        Text(
+                          'كشف الحساب',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
                         const SizedBox(height: 8),
                         Expanded(
-                          child: ledger.isEmpty
-                              ? const Center(child: Text('لا توجد حركات على هذا الطرف'))
-                              : ListView.separated(
-                                  itemCount: ledger.length,
-                                  separatorBuilder: (_, __) => const Divider(height: 1),
-                                  itemBuilder: (context, index) {
-                                    final row = ledger[index];
-                                    final delta = row.balanceDeltaMinor;
-                                    final amountText = '${delta >= 0 ? '+' : ''}${Money(delta).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final info = Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(row.entryType, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                              const SizedBox(height: 2),
-                                              Text('${row.occurredAt?.toLocal().toString() ?? ''} • ${row.referenceType ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.colors.textDim, fontSize: 11)),
-                                            ],
-                                          );
-                                          final amount = Text(amountText, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: delta >= 0 ? context.colors.success : context.colors.error, fontWeight: FontWeight.w800));
-                                          if (constraints.maxWidth < 440) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [info, const SizedBox(height: 5), amount]);
-                                          return Row(children: [Expanded(child: info), const SizedBox(width: 10), Flexible(child: amount)]);
-                                        },
-                                      ),
-                                    );
-                                  },
-                                ),
+                          child:
+                              ledger.isEmpty
+                                  ? const Center(
+                                    child: Text('لا توجد حركات على هذا الطرف'),
+                                  )
+                                  : ListView.separated(
+                                    itemCount: ledger.length,
+                                    separatorBuilder:
+                                        (_, __) => const Divider(height: 1),
+                                    itemBuilder: (context, index) {
+                                      final row = ledger[index];
+                                      final delta = row.balanceDeltaMinor;
+                                      final amountText =
+                                          '${delta >= 0 ? '+' : ''}${Money(delta).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                          horizontal: 4,
+                                        ),
+                                        child: LayoutBuilder(
+                                          builder: (context, constraints) {
+                                            final info = Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  row.entryType,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  '${row.occurredAt?.toLocal().toString() ?? ''} • ${row.referenceType ?? ''}',
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color:
+                                                        context.colors.textDim,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                              ],
+                                            );
+                                            final amount = Text(
+                                              amountText,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color:
+                                                    delta >= 0
+                                                        ? context.colors.success
+                                                        : context.colors.error,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            );
+                                            if (constraints.maxWidth < 440)
+                                              return Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
+                                                children: [
+                                                  info,
+                                                  const SizedBox(height: 5),
+                                                  amount,
+                                                ],
+                                              );
+                                            return Row(
+                                              children: [
+                                                Expanded(child: info),
+                                                const SizedBox(width: 10),
+                                                Flexible(child: amount),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                      );
+                                    },
+                                  ),
                         ),
                       ],
                     );
@@ -143,7 +228,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
     final cashboxes = await ref.read(cashRepositoryProvider).listCashboxes();
     if (!mounted) return;
     if (cashboxes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أضف صندوقاً أولاً')));
+      CustomSnackBar.showWarningSnackbar('أضف صندوقاً أولاً');
       return;
     }
     var cashboxId = cashboxes.first.id!;
@@ -151,39 +236,71 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text(receive ? 'قبض من الطرف' : 'دفع للطرف'),
-          content: SizedBox(
-            width: responsiveDialogWidth(context, 440),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: cashboxId,
-                  items: cashboxes.map((e) => DropdownMenuItem(value: e.id!, child: Text(e.name))).toList(),
-                  onChanged: (value) {
-                    if (value != null) setLocal(() => cashboxId = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'الصندوق'),
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: Text(receive ? 'قبض من الطرف' : 'دفع للطرف'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 440),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: cashboxId,
+                          items:
+                              cashboxes
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id!,
+                                      child: Text(e.name),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) {
+                            if (value != null)
+                              setLocal(() => cashboxId = value);
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'الصندوق',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: amount,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'المبلغ',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: note,
+                          decoration: const InputDecoration(
+                            labelText: 'ملاحظة',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('اعتماد'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'المبلغ')),
-                const SizedBox(height: 8),
-                TextField(controller: note, decoration: const InputDecoration(labelText: 'ملاحظة')),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('اعتماد')),
-          ],
-        ),
-      ),
     );
     if (ok == true) {
       try {
-        await ref.read(cashRepositoryProvider).partyPayment(
+        await ref
+            .read(cashRepositoryProvider)
+            .partyPayment(
               partyId: widget.party.id!,
               cashboxId: cashboxId,
               amountMinor: Money.fromMajor(amount.text),
@@ -193,7 +310,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
         ref.read(dataRevisionProvider.notifier).state++;
         setState(() => revision++);
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) CustomSnackBar.showErrorSnackbar('$e');
       }
     }
     amount.dispose();

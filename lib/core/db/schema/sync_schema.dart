@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS sync_operations (
   operation_type TEXT NOT NULL,
   client_created_at TEXT NOT NULL,
   server_received_at TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','accepted','conflict','rejected','failed')),
   error_message TEXT
 )
 ''',
@@ -100,40 +101,11 @@ CREATE TABLE IF NOT EXISTS sync_conflicts (
   resolved_at TEXT
 )
 ''',
-  '''
-CREATE TABLE IF NOT EXISTS legacy_sync_quarantine (
-  operation_id TEXT PRIMARY KEY,
-  entity_id TEXT,
-  aggregate_type TEXT,
-  aggregate_id TEXT,
-  legacy_action TEXT,
-  payload_json TEXT,
-  legacy_status TEXT,
-  legacy_created_at TEXT,
-  quarantine_reason TEXT NOT NULL,
-  quarantined_at TEXT NOT NULL,
-  review_status TEXT NOT NULL DEFAULT 'pending_review'
-    CHECK(review_status IN ('pending_review','kept_local','discarded')),
-  reviewed_at TEXT,
-  resolution_note TEXT
-)
-''',
-  '''
-CREATE TABLE IF NOT EXISTS migration_reports (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  migration_key TEXT NOT NULL,
-  entity_id TEXT,
-  affected_rows INTEGER NOT NULL DEFAULT 0,
-  details TEXT NOT NULL,
-  created_at TEXT NOT NULL
-)
-''',
   'CREATE INDEX IF NOT EXISTS idx_sync_outbox_entity_status ON sync_outbox(entity_id, status, next_retry_at)',
   'CREATE INDEX IF NOT EXISTS idx_sync_outbox_aggregate ON sync_outbox(entity_id, aggregate_type, aggregate_id)',
   'CREATE INDEX IF NOT EXISTS idx_sync_changes_sequence ON sync_changes(entity_id, server_sequence)',
   'CREATE INDEX IF NOT EXISTS idx_sync_changes_aggregate ON sync_changes(entity_id, aggregate_type, aggregate_id, aggregate_version)',
   'CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status ON sync_conflicts(entity_id, status)',
-  'CREATE INDEX IF NOT EXISTS idx_legacy_sync_quarantine_entity ON legacy_sync_quarantine(entity_id, quarantined_at)',
 ];
 
 Future<void> createSyncSchema(DatabaseExecutor db) =>

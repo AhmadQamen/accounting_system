@@ -1,6 +1,7 @@
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
@@ -218,7 +219,9 @@ class _InvoiceTabsBar extends StatelessWidget {
                             active
                                 ? [
                                   BoxShadow(
-                                    color: colors.primary.withValues(alpha: .08),
+                                    color: colors.primary.withValues(
+                                      alpha: .08,
+                                    ),
                                     blurRadius: 12,
                                     offset: const Offset(0, 3),
                                   ),
@@ -562,11 +565,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _invoiceTitleBand(
-                            context,
-                            icon,
-                            compact: compact,
-                          ),
+                          _invoiceTitleBand(context, icon, compact: compact),
                           const SizedBox(height: 18),
                           if (desktop)
                             Row(
@@ -643,8 +642,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     required bool compact,
   }) {
     final colors = context.colors;
-    final title =
-        _isWaste ? 'مستند هالك' : 'فاتورة ${widget.kind.label} جديدة';
+    final title = _isWaste ? 'مستند هالك' : 'فاتورة ${widget.kind.label} جديدة';
 
     final identity = Row(
       mainAxisSize: MainAxisSize.min,
@@ -821,8 +819,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
               final fieldWidth =
                   columns == 1
                       ? constraints.maxWidth
-                      : (constraints.maxWidth - ((columns - 1) * 12)) /
-                          columns;
+                      : (constraints.maxWidth - ((columns - 1) * 12)) / columns;
 
               Widget field(String label, Widget child, {bool full = false}) {
                 return SizedBox(
@@ -1381,11 +1378,9 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                 child: Text(
                   label,
                   style: TextStyle(
-                    color:
-                        strong ? colors.textPrimary : colors.textSecondary,
+                    color: strong ? colors.textPrimary : colors.textSecondary,
                     fontSize: strong ? 12 : 10.5,
-                    fontWeight:
-                        strong ? FontWeight.w900 : FontWeight.w600,
+                    fontWeight: strong ? FontWeight.w900 : FontWeight.w600,
                   ),
                 ),
               ),
@@ -1439,7 +1434,11 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                     ),
                   ),
                 ),
-                Icon(Icons.visibility_outlined, color: colors.textDim, size: 17),
+                Icon(
+                  Icons.visibility_outlined,
+                  color: colors.textDim,
+                  size: 17,
+                ),
               ],
             ),
             const SizedBox(height: 11),
@@ -1456,8 +1455,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                 lineDiscount == 0
                     ? '—'
                     : _formatMoney(context, lineDiscount, currency),
-                valueColor:
-                    lineDiscount == 0 ? colors.textDim : colors.error,
+                valueColor: lineDiscount == 0 ? colors.textDim : colors.error,
               ),
               const SizedBox(height: 6),
               TextField(
@@ -1523,9 +1521,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                 },
                 decoration: InputDecoration(
                   labelText:
-                      _isPurchase
-                          ? 'المدفوع للمورد'
-                          : 'المقبوض من العميل',
+                      _isPurchase ? 'المدفوع للمورد' : 'المقبوض من العميل',
                   prefixIcon: const Icon(Iconsax.wallet_money, size: 17),
                   isDense: true,
                 ),
@@ -1536,8 +1532,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                 remaining == 0
                     ? 'مسددة'
                     : _formatMoney(context, remaining, currency),
-                valueColor:
-                    remaining == 0 ? colors.success : colors.secondary,
+                valueColor: remaining == 0 ? colors.success : colors.secondary,
                 strong: remaining != 0,
               ),
             ],
@@ -1600,8 +1595,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
               final width =
                   columns == 1
                       ? constraints.maxWidth
-                      : (constraints.maxWidth - ((columns - 1) * 10)) /
-                          columns;
+                      : (constraints.maxWidth - ((columns - 1) * 10)) / columns;
 
               Widget metric({
                 required String label,
@@ -1661,8 +1655,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color:
-                                    emphasized ? tint : colors.textPrimary,
+                                color: emphasized ? tint : colors.textPrimary,
                                 fontSize: emphasized ? 15 : 12,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -1901,9 +1894,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     );
     if (!context.mounted) return;
     if (products.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('أضف منتجاً أولاً')));
+      CustomSnackBar.showWarningSnackbar('أضف منتجاً أولاً');
       return;
     }
 
@@ -1936,8 +1927,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
         }
         final factor = unit.factor;
         final unitPriceMinor = _isWaste ? 0 : Money.fromMajor(price.text);
-        final discountMinor =
-            _isWaste ? 0 : Money.fromMajor(lineDiscount.text);
+        final discountMinor = _isWaste ? 0 : Money.fromMajor(lineDiscount.text);
         final gross = Money.multiplyByQuantity(unitPriceMinor, quantity);
         if (discountMinor < 0 || discountMinor > gross) {
           throw const FormatException('خصم السطر غير صالح');
@@ -1964,9 +1954,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
         );
       } catch (error) {
         if (dialogContext.mounted) {
-          ScaffoldMessenger.of(
-            dialogContext,
-          ).showSnackBar(SnackBar(content: Text('$error')));
+          CustomSnackBar.showErrorSnackbar('$error');
         }
       }
     }
@@ -1974,516 +1962,536 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     final result = await showDialog<_DraftLine>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: .42),
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocal) {
-          final colors = dialogContext.colors;
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder: (dialogContext, setLocal) {
+              final colors = dialogContext.colors;
 
-          void changeQuantity(double delta) {
-            final current =
-                double.tryParse(qty.text.trim().replaceAll(',', '.')) ?? 1;
-            final next = current + delta;
-            if (next <= 0) return;
-            qty.text =
-                next == next.roundToDouble()
-                    ? '${next.toInt()}'
-                    : next.toStringAsFixed(2);
-            setLocal(() {});
-          }
+              void changeQuantity(double delta) {
+                final current =
+                    double.tryParse(qty.text.trim().replaceAll(',', '.')) ?? 1;
+                final next = current + delta;
+                if (next <= 0) return;
+                qty.text =
+                    next == next.roundToDouble()
+                        ? '${next.toInt()}'
+                        : next.toStringAsFixed(2);
+                setLocal(() {});
+              }
 
-          Widget labeled(String label, Widget child) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(
-                    start: 2,
-                    bottom: 7,
-                  ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                child,
-              ],
-            );
-          }
-
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 18,
-            ),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 720,
-                maxHeight: MediaQuery.sizeOf(dialogContext).height - 36,
-              ),
-              child: Material(
-                color: colors.bgElevated,
-                borderRadius: BorderRadius.circular(22),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+              Widget labeled(String label, Widget child) {
+                return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(20, 17, 14, 17),
-                        decoration: BoxDecoration(
-                          color: colors.primary.withValues(alpha: .055),
-                          border: Border(
-                            bottom: BorderSide(color: colors.border),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: colors.primary.withValues(alpha: .11),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(
-                                Iconsax.box_add,
-                                color: colors.primary,
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'إضافة بند',
-                                    style: TextStyle(
-                                      color: colors.textPrimary,
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    'اختر المنتج وحدد الكمية، وسيُحسب الإجمالي تلقائياً',
-                                    style: TextStyle(
-                                      color: colors.textDim,
-                                      fontSize: 10.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'إغلاق',
-                              onPressed: () => Navigator.pop(dialogContext),
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ],
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 2,
+                        bottom: 7,
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final twoColumns = constraints.maxWidth >= 560;
-                                final productField = labeled(
-                                  'المنتج',
-                                  DropdownButtonFormField<String>(
-                                    value: product.productId,
-                                    isExpanded: true,
-                                    items:
-                                        products
-                                            .map(
-                                              (row) => DropdownMenuItem(
-                                                value: row.productId,
-                                                child: Text(
-                                                  row.productName,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            )
-                                            .toList(),
-                                    onChanged: (value) async {
-                                      if (value == null) return;
-                                      final nextProduct = products.firstWhere(
-                                        (row) => row.productId == value,
-                                      );
-                                      final nextUnits = await masterRepo
-                                          .listProductUnits(value);
-                                      if (!dialogContext.mounted ||
-                                          nextUnits.isEmpty) {
-                                        return;
-                                      }
-                                      setLocal(() {
-                                        product = nextProduct;
-                                        units = nextUnits;
-                                        unit = nextUnits.first;
-                                        if (!_isPurchase) {
-                                          price.text = _moneyInput(
-                                            unit.salePriceMinor,
-                                          );
-                                        }
-                                      });
-                                    },
-                                    decoration: const InputDecoration(
-                                      labelText: 'المنتج',
-                                      prefixIcon: Icon(Iconsax.box, size: 18),
-                                    ),
-                                  ),
-                                );
-                                final unitField = labeled(
-                                  'الوحدة',
-                                  DropdownButtonFormField<String>(
-                                    value: unit.id!,
-                                    isExpanded: true,
-                                    items:
-                                        units
-                                            .map(
-                                              (row) => DropdownMenuItem(
-                                                value: row.id!,
-                                                child: Text(
-                                                  '${row.name} × ${row.factor}',
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            )
-                                            .toList(),
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setLocal(() {
-                                        unit = units.firstWhere(
-                                          (row) => row.id == value,
-                                        );
-                                        if (!_isPurchase) {
-                                          price.text = _moneyInput(
-                                            unit.salePriceMinor,
-                                          );
-                                        }
-                                      });
-                                    },
-                                    decoration: const InputDecoration(
-                                      labelText: 'الوحدة',
-                                      prefixIcon: Icon(
-                                        Icons.straighten_outlined,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                                if (!twoColumns) {
-                                  return Column(
-                                    children: [
-                                      productField,
-                                      const SizedBox(height: 14),
-                                      unitField,
-                                    ],
-                                  );
-                                }
-                                return Row(
+                    ),
+                    child,
+                  ],
+                );
+              }
+
+              return Dialog(
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 18,
+                ),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 720,
+                    maxHeight: MediaQuery.sizeOf(dialogContext).height - 36,
+                  ),
+                  child: Material(
+                    color: colors.bgElevated,
+                    borderRadius: BorderRadius.circular(22),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(20, 17, 14, 17),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withValues(alpha: .055),
+                            border: Border(
+                              bottom: BorderSide(color: colors.border),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: colors.primary.withValues(alpha: .11),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Iconsax.box_add,
+                                  color: colors.primary,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(child: productField),
-                                    const SizedBox(width: 14),
-                                    Expanded(child: unitField),
+                                    Text(
+                                      'إضافة بند',
+                                      style: TextStyle(
+                                        color: colors.textPrimary,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'اختر المنتج وحدد الكمية، وسيُحسب الإجمالي تلقائياً',
+                                      style: TextStyle(
+                                        color: colors.textDim,
+                                        fontSize: 10.5,
+                                      ),
+                                    ),
                                   ],
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 16),
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: colors.bgPage,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: colors.border),
+                                ),
                               ),
+                              IconButton(
+                                tooltip: 'إغلاق',
+                                onPressed: () => Navigator.pop(dialogContext),
+                                icon: const Icon(Icons.close_rounded),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Padding(
+                              padding: const EdgeInsets.all(20),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          'الكمية',
-                                          style: TextStyle(
-                                            color: colors.textPrimary,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w900,
+                                  LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final twoColumns =
+                                          constraints.maxWidth >= 560;
+                                      final productField = labeled(
+                                        'المنتج',
+                                        DropdownButtonFormField<String>(
+                                          value: product.productId,
+                                          isExpanded: true,
+                                          items:
+                                              products
+                                                  .map(
+                                                    (row) => DropdownMenuItem(
+                                                      value: row.productId,
+                                                      child: Text(
+                                                        row.productName,
+                                                        overflow:
+                                                            TextOverflow
+                                                                .ellipsis,
+                                                      ),
+                                                    ),
+                                                  )
+                                                  .toList(),
+                                          onChanged: (value) async {
+                                            if (value == null) return;
+                                            final nextProduct = products
+                                                .firstWhere(
+                                                  (row) =>
+                                                      row.productId == value,
+                                                );
+                                            final nextUnits = await masterRepo
+                                                .listProductUnits(value);
+                                            if (!dialogContext.mounted ||
+                                                nextUnits.isEmpty) {
+                                              return;
+                                            }
+                                            setLocal(() {
+                                              product = nextProduct;
+                                              units = nextUnits;
+                                              unit = nextUnits.first;
+                                              if (!_isPurchase) {
+                                                price.text = _moneyInput(
+                                                  unit.salePriceMinor,
+                                                );
+                                              }
+                                            });
+                                          },
+                                          decoration: const InputDecoration(
+                                            labelText: 'المنتج',
+                                            prefixIcon: Icon(
+                                              Iconsax.box,
+                                              size: 18,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 9,
-                                          vertical: 5,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: colors.success.withValues(
-                                            alpha: .09,
+                                      );
+                                      final unitField = labeled(
+                                        'الوحدة',
+                                        DropdownButtonFormField<String>(
+                                          value: unit.id!,
+                                          isExpanded: true,
+                                          items:
+                                              units
+                                                  .map(
+                                                    (row) => DropdownMenuItem(
+                                                      value: row.id!,
+                                                      child: Text(
+                                                        '${row.name} × ${row.factor}',
+                                                        overflow:
+                                                            TextOverflow
+                                                                .ellipsis,
+                                                      ),
+                                                    ),
+                                                  )
+                                                  .toList(),
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            setLocal(() {
+                                              unit = units.firstWhere(
+                                                (row) => row.id == value,
+                                              );
+                                              if (!_isPurchase) {
+                                                price.text = _moneyInput(
+                                                  unit.salePriceMinor,
+                                                );
+                                              }
+                                            });
+                                          },
+                                          decoration: const InputDecoration(
+                                            labelText: 'الوحدة',
+                                            prefixIcon: Icon(
+                                              Icons.straighten_outlined,
+                                              size: 18,
+                                            ),
                                           ),
-                                          borderRadius: BorderRadius.circular(
-                                            99,
-                                          ),
                                         ),
-                                        child: Text(
-                                          'متوفر: ${product.currentQuantity}',
-                                          style: TextStyle(
-                                            color: colors.success,
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                      );
+                                      if (!twoColumns) {
+                                        return Column(
+                                          children: [
+                                            productField,
+                                            const SizedBox(height: 14),
+                                            unitField,
+                                          ],
+                                        );
+                                      }
+                                      return Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: productField),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: unitField),
+                                        ],
+                                      );
+                                    },
                                   ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      _QuantityButton(
-                                        icon: Icons.remove_rounded,
-                                        onTap: () => changeQuantity(-1),
-                                      ),
-                                      const SizedBox(width: 9),
-                                      Expanded(
-                                        child: TextField(
-                                          controller: qty,
-                                          textAlign: TextAlign.center,
+                                  const SizedBox(height: 16),
+                                  Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: colors.bgPage,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(color: colors.border),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                'الكمية',
+                                                style: TextStyle(
+                                                  color: colors.textPrimary,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w900,
+                                                ),
+                                              ),
+                                            ),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 9,
+                                                    vertical: 5,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: colors.success
+                                                    .withValues(alpha: .09),
+                                                borderRadius:
+                                                    BorderRadius.circular(99),
+                                              ),
+                                              child: Text(
+                                                'متوفر: ${product.currentQuantity}',
+                                                style: TextStyle(
+                                                  color: colors.success,
+                                                  fontSize: 9.5,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          children: [
+                                            _QuantityButton(
+                                              icon: Icons.remove_rounded,
+                                              onTap: () => changeQuantity(-1),
+                                            ),
+                                            const SizedBox(width: 9),
+                                            Expanded(
+                                              child: TextField(
+                                                controller: qty,
+                                                textAlign: TextAlign.center,
+                                                keyboardType:
+                                                    const TextInputType.numberWithOptions(
+                                                      decimal: true,
+                                                    ),
+                                                onChanged:
+                                                    (_) => setLocal(() {}),
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText: 'الكمية',
+                                                      isDense: true,
+                                                    ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 9),
+                                            _QuantityButton(
+                                              icon: Icons.add_rounded,
+                                              filled: true,
+                                              onTap: () => changeQuantity(1),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (!_isWaste) ...[
+                                    const SizedBox(height: 16),
+                                    LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        final twoColumns =
+                                            constraints.maxWidth >= 520;
+                                        final priceField = TextField(
+                                          controller: price,
+                                          readOnly: !_isPurchase,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          onChanged: (_) => setLocal(() {}),
+                                          decoration: InputDecoration(
+                                            labelText:
+                                                _isPurchase
+                                                    ? 'تكلفة الوحدة'
+                                                    : 'سعر الوحدة',
+                                            helperText:
+                                                _isPurchase
+                                                    ? null
+                                                    : 'يُعبّأ تلقائياً من المنتج',
+                                            prefixIcon: const Icon(
+                                              Iconsax.money_3,
+                                              size: 18,
+                                            ),
+                                            suffixIcon:
+                                                _isPurchase
+                                                    ? null
+                                                    : const Icon(
+                                                      Icons
+                                                          .lock_outline_rounded,
+                                                      size: 18,
+                                                    ),
+                                          ),
+                                        );
+                                        final discountField = TextField(
+                                          controller: lineDiscount,
                                           keyboardType:
                                               const TextInputType.numberWithOptions(
                                                 decimal: true,
                                               ),
                                           onChanged: (_) => setLocal(() {}),
                                           decoration: const InputDecoration(
-                                            labelText: 'الكمية',
-                                            isDense: true,
+                                            labelText: 'خصم السطر',
+                                            prefixIcon: Icon(
+                                              Iconsax.discount_shape,
+                                              size: 18,
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 9),
-                                      _QuantityButton(
-                                        icon: Icons.add_rounded,
-                                        filled: true,
-                                        onTap: () => changeQuantity(1),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (!_isWaste) ...[
-                              const SizedBox(height: 16),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final twoColumns = constraints.maxWidth >= 520;
-                                  final priceField = TextField(
-                                    controller: price,
-                                    readOnly: !_isPurchase,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                    onChanged: (_) => setLocal(() {}),
-                                    decoration: InputDecoration(
-                                      labelText:
-                                          _isPurchase
-                                              ? 'تكلفة الوحدة'
-                                              : 'سعر الوحدة',
-                                      helperText:
-                                          _isPurchase
-                                              ? null
-                                              : 'يُعبّأ تلقائياً من المنتج',
-                                      prefixIcon: const Icon(
-                                        Iconsax.money_3,
-                                        size: 18,
-                                      ),
-                                      suffixIcon:
-                                          _isPurchase
-                                              ? null
-                                              : const Icon(
-                                                Icons.lock_outline_rounded,
-                                                size: 18,
-                                              ),
+                                        );
+                                        if (!twoColumns) {
+                                          return Column(
+                                            children: [
+                                              priceField,
+                                              const SizedBox(height: 14),
+                                              discountField,
+                                            ],
+                                          );
+                                        }
+                                        return Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(child: priceField),
+                                            const SizedBox(width: 14),
+                                            Expanded(child: discountField),
+                                          ],
+                                        );
+                                      },
                                     ),
-                                  );
-                                  final discountField = TextField(
-                                    controller: lineDiscount,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                    onChanged: (_) => setLocal(() {}),
-                                    decoration: const InputDecoration(
-                                      labelText: 'خصم السطر',
-                                      prefixIcon: Icon(
-                                        Iconsax.discount_shape,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  );
-                                  if (!twoColumns) {
-                                    return Column(
-                                      children: [
-                                        priceField,
-                                        const SizedBox(height: 14),
-                                        discountField,
-                                      ],
-                                    );
-                                  }
-                                  return Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(child: priceField),
-                                      const SizedBox(width: 14),
-                                      Expanded(child: discountField),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ],
-                            const SizedBox(height: 18),
-                            Container(
-                              padding: const EdgeInsets.all(15),
-                              decoration: BoxDecoration(
-                                color: colors.success.withValues(alpha: .075),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: colors.success.withValues(alpha: .16),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
+                                  ],
+                                  const SizedBox(height: 18),
                                   Container(
-                                    width: 42,
-                                    height: 42,
+                                    padding: const EdgeInsets.all(15),
                                     decoration: BoxDecoration(
                                       color: colors.success.withValues(
-                                        alpha: .12,
+                                        alpha: .075,
                                       ),
-                                      borderRadius: BorderRadius.circular(11),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: colors.success.withValues(
+                                          alpha: .16,
+                                        ),
+                                      ),
                                     ),
-                                    child: Icon(
-                                      Iconsax.receipt_1,
-                                      color: colors.success,
-                                      size: 21,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 11),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                    child: Row(
                                       children: [
-                                        Text(
-                                          product.productName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: colors.textPrimary,
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w800,
+                                        Container(
+                                          width: 42,
+                                          height: 42,
+                                          decoration: BoxDecoration(
+                                            color: colors.success.withValues(
+                                              alpha: .12,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              11,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '${qty.text} ${unit.name}',
-                                          style: TextStyle(
-                                            color: colors.textDim,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (!_isWaste)
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          'إجمالي البند',
-                                          style: TextStyle(
-                                            color: colors.textSecondary,
-                                            fontSize: 9.5,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          _formatMoney(
-                                            dialogContext,
-                                            currentLineTotal(),
-                                            currency,
-                                          ),
-                                          style: TextStyle(
+                                          child: Icon(
+                                            Iconsax.receipt_1,
                                             color: colors.success,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w900,
+                                            size: 21,
                                           ),
                                         ),
+                                        const SizedBox(width: 11),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                product.productName,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: colors.textPrimary,
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                '${qty.text} ${unit.name}',
+                                                style: TextStyle(
+                                                  color: colors.textDim,
+                                                  fontSize: 10,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (!_isWaste)
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                'إجمالي البند',
+                                                style: TextStyle(
+                                                  color: colors.textSecondary,
+                                                  fontSize: 9.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                _formatMoney(
+                                                  dialogContext,
+                                                  currentLineTotal(),
+                                                  currency,
+                                                ),
+                                                style: TextStyle(
+                                                  color: colors.success,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w900,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                       ],
                                     ),
+                                  ),
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.bgPage.withValues(alpha: .7),
+                            border: Border(
+                              top: BorderSide(color: colors.border),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(dialogContext),
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(0, 40),
+                                ),
+                                child: const Text('إلغاء'),
+                              ),
+                              const SizedBox(width: 10),
+                              FilledButton.icon(
+                                onPressed: () => submit(dialogContext),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(0, 40),
+                                ),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('إضافة'),
+                              ),
                             ],
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                    Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colors.bgPage.withValues(alpha: .7),
-                          border: Border(
-                            top: BorderSide(color: colors.border),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(dialogContext),
-                              style: TextButton.styleFrom(
-                                minimumSize: const Size(0, 40),
-                              ),
-                              child: const Text('إلغاء'),
-                            ),
-                            const SizedBox(width: 10),
-                            FilledButton.icon(
-                              onPressed: () => submit(dialogContext),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(0, 40),
-                              ),
-                              icon: const Icon(Icons.add_rounded, size: 18),
-                              label: const Text('إضافة'),
-                            ),
-                          ],
-                        ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
     );
     qty.dispose();
     price.dispose();
@@ -2501,15 +2509,11 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
 
   Future<void> _save({required bool post}) async {
     if (_lines.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أضف بنداً واحداً على الأقل')),
-      );
+      CustomSnackBar.showWarningSnackbar('أضف بنداً واحداً على الأقل');
       return;
     }
     if (_isPurchase && _partyId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('اختر مورداً')));
+      CustomSnackBar.showWarningSnackbar('اختر مورداً');
       return;
     }
     setState(() => _saving = true);
@@ -2586,12 +2590,8 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
       ref.read(dataRevisionProvider.notifier).state++;
       if (mounted) {
         _markClean();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              post ? 'تم الاعتماد محلياً بنجاح' : 'تم حفظ المسودة محلياً',
-            ),
-          ),
+        CustomSnackBar.showSuccessSnackbar(
+          post ? 'تم الاعتماد محلياً بنجاح' : 'تم حفظ المسودة محلياً',
         );
         if (widget.embedded) {
           widget.onSaved?.call();
@@ -2600,10 +2600,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
         }
       }
     } catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) CustomSnackBar.showErrorSnackbar('$error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

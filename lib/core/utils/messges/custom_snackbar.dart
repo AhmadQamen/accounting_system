@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:accounting_system/accounting_system.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:iconsax/iconsax.dart';
 
 class CustomSnackBar {
@@ -32,7 +33,7 @@ class CustomSnackBar {
     );
   }
 
-  static void showErrorSnackbar(String text) {
+  static void showErrorSnackbar(String text, {String? copyText}) {
     final context = AccountingSystem.navigatorKey.currentContext;
     if (context == null) return;
     _show(
@@ -40,6 +41,7 @@ class CustomSnackBar {
       message: text,
       icon: Iconsax.close_circle,
       accent: const Color(0xFFDC2626),
+      copyText: copyText ?? text,
     );
   }
 
@@ -70,6 +72,7 @@ class CustomSnackBar {
     required String message,
     required IconData icon,
     required Color accent,
+    String? copyText,
   }) {
     if (_isDuplicate(message)) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -88,6 +91,7 @@ class CustomSnackBar {
           icon: icon,
           accent: accent,
           isDesktop: false,
+          copyText: copyText,
         ),
       ),
     );
@@ -102,6 +106,7 @@ class _SnackContent extends StatefulWidget {
   final Duration duration;
   final Color accent;
   final bool isDesktop;
+  final String? copyText;
 
   const _SnackContent({
     required this.message,
@@ -109,6 +114,7 @@ class _SnackContent extends StatefulWidget {
     required this.accent,
     required this.isDesktop,
     required this.duration,
+    this.copyText,
   });
 
   @override
@@ -179,9 +185,10 @@ class _SnackContentState extends State<_SnackContent>
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
-          constraints: widget.isDesktop
-              ? const BoxConstraints(maxWidth: 340, minWidth: 260)
-              : const BoxConstraints(maxWidth: double.infinity),
+          constraints:
+              widget.isDesktop
+                  ? const BoxConstraints(maxWidth: 340, minWidth: 260)
+                  : const BoxConstraints(maxWidth: double.infinity),
           // Gradient "glass" border trick: outer padding of 1.2px filled
           // with a soft diagonal gradient, inner content clipped on top.
           padding: const EdgeInsets.all(1.2),
@@ -240,9 +247,8 @@ class _SnackContentState extends State<_SnackContent>
                   vertical: 12,
                 ),
                 child: Row(
-                  mainAxisSize: widget.isDesktop
-                      ? MainAxisSize.min
-                      : MainAxisSize.max,
+                  mainAxisSize:
+                      widget.isDesktop ? MainAxisSize.min : MainAxisSize.max,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     _buildIconWithRing(accent),
@@ -258,6 +264,19 @@ class _SnackContentState extends State<_SnackContent>
                         ),
                       ),
                     ),
+                    if (widget.copyText != null) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'نسخ تفاصيل الخطأ',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: widget.copyText!),
+                          );
+                        },
+                        icon: Icon(Iconsax.copy, size: 18, color: accent),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -274,12 +293,13 @@ class _SnackContentState extends State<_SnackContent>
         child: ScaleTransition(
           scale: _entryScale,
           alignment: Alignment.center,
-          child: widget.isDesktop
-              ? Align(alignment: Alignment.bottomRight, child: card)
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: card,
-                ),
+          child:
+              widget.isDesktop
+                  ? Align(alignment: Alignment.bottomRight, child: card)
+                  : Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: card,
+                  ),
         ),
       ),
     );

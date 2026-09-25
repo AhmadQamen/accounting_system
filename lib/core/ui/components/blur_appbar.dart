@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:accounting_system/core/ui/components/sync_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -34,9 +35,10 @@ class BlurAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.colors;
-    final overlayStyle = theme.brightness == Brightness.dark
-        ? SystemUiOverlayStyle.light
-        : SystemUiOverlayStyle.dark;
+    final overlayStyle =
+        theme.brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark;
 
     return ClipRect(
       child: BackdropFilter(
@@ -54,7 +56,7 @@ class BlurAppBar extends StatelessWidget implements PreferredSizeWidget {
           scrolledUnderElevation: 0,
           toolbarHeight: toolbarHeight,
           title: title,
-          actions: actions,
+          actions: [const SyncIndicator(), ...?actions],
           bottom: bottom,
           shape: Border(
             bottom: BorderSide(color: colors.border.withValues(alpha: .72)),
@@ -65,9 +67,8 @@ class BlurAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 
   @override
-  Size get preferredSize => Size.fromHeight(
-        toolbarHeight + (bottom?.preferredSize.height ?? 0),
-      );
+  Size get preferredSize =>
+      Size.fromHeight(toolbarHeight + (bottom?.preferredSize.height ?? 0));
 }
 
 /// Backwards-compatible spelling from the original project.

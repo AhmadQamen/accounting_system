@@ -186,7 +186,6 @@ void main() {
         payload: const {'id': 'draft-sale'},
       );
       expect(await db.query('sync_outbox'), isEmpty);
-      expect(await db.query('legacy_sync_quarantine'), isEmpty);
 
       await expectLater(
         db.transaction((txn) async {

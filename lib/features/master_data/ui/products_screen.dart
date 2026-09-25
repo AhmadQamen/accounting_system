@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
@@ -60,45 +61,71 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                   controller: search,
                   hintText: 'ابحث باسم المنتج أو الباركود…',
                   onChanged: (_) => setState(() {}),
-                  trailing: search.text.isEmpty
-                      ? null
-                      : IconButton(
-                          onPressed: () {
-                            search.clear();
-                            setState(() {});
-                          },
-                          icon: const Icon(Iconsax.close_circle, size: 18),
-                        ),
+                  trailing:
+                      search.text.isEmpty
+                          ? null
+                          : IconButton(
+                            onPressed: () {
+                              search.clear();
+                              setState(() {});
+                            },
+                            icon: const Icon(Iconsax.close_circle, size: 18),
+                          ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
             FutureBuilder<List<Product>>(
-              future: ref.read(masterDataRepositoryProvider).listProducts(search: search.text),
+              future: ref
+                  .read(masterDataRepositoryProvider)
+                  .listProducts(search: search.text),
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
-                  return const SizedBox(height: 300, child: Center(child: CircularProgressIndicator()));
+                  return const SizedBox(
+                    height: 300,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
                 }
                 if (snapshot.hasError) {
-                  return EmptyState(icon: Iconsax.warning_2, title: 'تعذر تحميل المنتجات', subtitle: '${snapshot.error}');
+                  return EmptyState(
+                    icon: Iconsax.warning_2,
+                    title: 'تعذر تحميل المنتجات',
+                    subtitle: '${snapshot.error}',
+                  );
                 }
                 final rows = snapshot.data ?? const <Product>[];
                 if (rows.isEmpty) {
                   return EmptyState(
-                    title: search.text.trim().isEmpty ? 'لا توجد منتجات بعد' : 'لا توجد نتائج مطابقة',
-                    subtitle: search.text.trim().isEmpty
-                        ? 'ابدأ بإضافة أول منتج، ثم أضف وحداته وباركوداته.'
-                        : 'جرّب البحث بكلمة مختلفة أو امسح حقل البحث.',
+                    title:
+                        search.text.trim().isEmpty
+                            ? 'لا توجد منتجات بعد'
+                            : 'لا توجد نتائج مطابقة',
+                    subtitle:
+                        search.text.trim().isEmpty
+                            ? 'ابدأ بإضافة أول منتج، ثم أضف وحداته وباركوداته.'
+                            : 'جرّب البحث بكلمة مختلفة أو امسح حقل البحث.',
                     icon: Iconsax.box,
-                    action: search.text.trim().isEmpty
-                        ? FilledButton.icon(onPressed: _add, icon: const Icon(Icons.add_rounded), label: const Text('إضافة منتج'))
-                        : null,
+                    action:
+                        search.text.trim().isEmpty
+                            ? FilledButton.icon(
+                              onPressed: _add,
+                              icon: const Icon(Icons.add_rounded),
+                              label: const Text('إضافة منتج'),
+                            )
+                            : null,
                   );
                 }
                 return LayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.maxWidth;
-                    final columns = width >= 1180 ? 4 : width >= 820 ? 3 : width >= 560 ? 2 : 1;
+                    final columns =
+                        width >= 1180
+                            ? 4
+                            : width >= 820
+                            ? 3
+                            : width >= 560
+                            ? 2
+                            : 1;
                     final cardWidth = (width - ((columns - 1) * 12)) / columns;
                     return Wrap(
                       spacing: 12,
@@ -108,13 +135,19 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                           SizedBox(
                             width: cardWidth,
                             child: AnimatedEntrance(
-                              delay: Duration(milliseconds: 100 + ((i % 8) * 30)),
+                              delay: Duration(
+                                milliseconds: 100 + ((i % 8) * 30),
+                              ),
                               child: _ProductCard(
                                 product: rows[i],
-                                onTap: () => showDialog(
-                                  context: context,
-                                  builder: (_) => ProductDetailsDialog(product: rows[i]),
-                                ),
+                                onTap:
+                                    () => showDialog(
+                                      context: context,
+                                      builder:
+                                          (_) => ProductDetailsDialog(
+                                            product: rows[i],
+                                          ),
+                                    ),
                               ),
                             ),
                           ),
@@ -137,45 +170,76 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     final barcode = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.inventory_2_outlined, color: context.colors.primary),
-            const SizedBox(width: 10),
-            const Text('منتج جديد'),
-          ],
-        ),
-        content: SizedBox(
-          width: responsiveDialogWidth(context, 440),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: 'اسم المنتج', prefixIcon: Icon(Iconsax.box))),
-              const SizedBox(height: 10),
-              TextField(controller: unit, decoration: const InputDecoration(labelText: 'الوحدة الرئيسية', prefixIcon: Icon(Icons.straighten_outlined))),
-              const SizedBox(height: 10),
-              TextField(
-                controller: salePrice,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'سعر البيع',
-                  prefixIcon: Icon(Icons.sell_outlined),
-                ),
+      builder:
+          (ctx) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.inventory_2_outlined, color: context.colors.primary),
+                const SizedBox(width: 10),
+                const Text('منتج جديد'),
+              ],
+            ),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 440),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: name,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم المنتج',
+                      prefixIcon: Icon(Iconsax.box),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: unit,
+                    decoration: const InputDecoration(
+                      labelText: 'الوحدة الرئيسية',
+                      prefixIcon: Icon(Icons.straighten_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: salePrice,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'سعر البيع',
+                      prefixIcon: Icon(Icons.sell_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: barcode,
+                    decoration: const InputDecoration(
+                      labelText: 'الباركود (اختياري)',
+                      prefixIcon: Icon(Icons.qr_code_scanner_outlined),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              TextField(controller: barcode, decoration: const InputDecoration(labelText: 'الباركود (اختياري)', prefixIcon: Icon(Icons.qr_code_scanner_outlined))),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, true),
+                icon: const Icon(Iconsax.tick_circle, size: 17),
+                label: const Text('حفظ'),
+              ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          FilledButton.icon(onPressed: () => Navigator.pop(ctx, true), icon: const Icon(Iconsax.tick_circle, size: 17), label: const Text('حفظ')),
-        ],
-      ),
     );
     if (ok == true && name.text.trim().isNotEmpty) {
       try {
-        await ref.read(masterDataRepositoryProvider).createProduct(
+        await ref
+            .read(masterDataRepositoryProvider)
+            .createProduct(
               name: name.text,
               primaryUnitName: unit.text,
               salePriceMinor: Money.fromMajor(salePrice.text),
@@ -184,9 +248,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
         ref.read(dataRevisionProvider.notifier).state++;
       } catch (error) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('تعذر حفظ المنتج: $error')),
-          );
+          CustomSnackBar.showErrorSnackbar('تعذر حفظ المنتج: $error');
         }
       }
     }
@@ -222,11 +284,25 @@ class _ProductCard extends StatelessWidget {
                 height: 42,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [colors.primary.withValues(alpha: .18), colors.secondary.withValues(alpha: .18)]),
+                  gradient: LinearGradient(
+                    colors: [
+                      colors.primary.withValues(alpha: .18),
+                      colors.secondary.withValues(alpha: .18),
+                    ],
+                  ),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: colors.primary.withValues(alpha: .16)),
+                  border: Border.all(
+                    color: colors.primary.withValues(alpha: .16),
+                  ),
                 ),
-                child: Text(initials, style: TextStyle(color: colors.primary, fontSize: 17, fontWeight: FontWeight.w900)),
+                child: Text(
+                  initials,
+                  style: TextStyle(
+                    color: colors.primary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
               const Spacer(),
               const SizedBox(width: 10),
@@ -234,7 +310,16 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 14)),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+            ),
+          ),
           const SizedBox(height: 4),
           Text(
             '${product.categoryName ?? 'بدون تصنيف'} • ${product.primaryUnitName ?? 'وحدة'}',
@@ -245,11 +330,19 @@ class _ProductCard extends StatelessWidget {
           const SizedBox(height: 9),
           Row(
             children: [
-              Icon(Iconsax.warning_2, size: 13, color: minQty > 0 ? colors.warning : colors.textDim),
+              Icon(
+                Iconsax.warning_2,
+                size: 13,
+                color: minQty > 0 ? colors.warning : colors.textDim,
+              ),
               const SizedBox(width: 5),
               Text(
                 minQty > 0 ? 'حد أدنى ${_qty(minQty)}' : 'بدون حد أدنى',
-                style: TextStyle(color: minQty > 0 ? colors.warning : colors.textDim, fontSize: 10.5, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: minQty > 0 ? colors.warning : colors.textDim,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -258,5 +351,8 @@ class _ProductCard extends StatelessWidget {
     );
   }
 
-  String _qty(double value) => value.truncateToDouble() == value ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
+  String _qty(double value) =>
+      value.truncateToDouble() == value
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(2);
 }

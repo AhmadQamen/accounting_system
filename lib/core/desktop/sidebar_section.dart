@@ -12,12 +12,14 @@ class SidebarSection extends StatelessWidget {
     required this.currentRouteType,
     required this.onItemTap,
     this.collapsed = false,
+    this.badgeFor,
   });
 
   final SidebarSectionModel section;
   final RouteType currentRouteType;
   final ValueChanged<RouteType> onItemTap;
   final bool collapsed;
+  final int? Function(RouteType routeType)? badgeFor;
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +51,8 @@ class SidebarSection extends StatelessWidget {
                   DesktopSidebarItem(
                     icon: item.icon,
                     label: item.label,
-                    badgeCount: item.badgeCount,
+                    badgeCount:
+                        badgeFor?.call(item.routeType) ?? item.badgeCount,
                     collapsed: collapsed,
                     selected: item.routeType == currentRouteType,
                     onTap: () => onItemTap(item.routeType),

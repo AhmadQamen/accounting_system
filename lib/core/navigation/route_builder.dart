@@ -1,4 +1,5 @@
 import 'package:accounting_system/features/accounting/ui/screens/accounting_home.dart';
+import 'package:accounting_system/features/auth/ui/screens/organization_members_screen.dart';
 import 'package:accounting_system/features/cash/ui/cash_screen.dart';
 import 'package:accounting_system/features/documents/ui/document_list_screen.dart';
 import 'package:accounting_system/features/documents/ui/new_document_screen.dart';
@@ -10,6 +11,7 @@ import 'package:accounting_system/features/master_data/ui/products_screen.dart';
 import 'package:accounting_system/features/master_data/ui/warehouses_screen.dart';
 import 'package:accounting_system/features/reports/ui/reports_screen.dart';
 import 'package:accounting_system/features/settings/ui/screens/setting_screen.dart';
+import 'package:accounting_system/features/settings/ui/screens/sync_screen.dart';
 import 'package:flutter/material.dart';
 import 'app_route.dart';
 
@@ -47,6 +49,8 @@ Widget buildPage(AppRoute route) {
     RouteType.cashSessions => const CashScreen(mode: CashScreenMode.sessions),
     RouteType.financialYears => const FinancialYearsScreen(),
     RouteType.reports => const ReportsScreen(),
+    RouteType.sync => const SyncScreen(),
+    RouteType.organizationMembers => const OrganizationMembersScreen(),
     RouteType.settings => const SettingsScreen(),
   };
 }
