@@ -285,8 +285,9 @@ FROM sync_outbox_v6_archive
   ) async {
     final columns = await db.rawQuery('PRAGMA table_info($table)');
     final exists = columns.any((row) => row['name'] == column);
-    if (!exists)
+    if (!exists) {
       await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+    }
   }
 
   Future<T> transaction<T>(Future<T> Function(Transaction txn) action) async {
