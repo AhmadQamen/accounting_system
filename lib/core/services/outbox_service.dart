@@ -160,6 +160,7 @@ class OutboxService {
         'name',
         'factor',
         'primary',
+        'salePriceMinor',
         'updatedAt',
       },
       'ProductUnitUpdated': {
@@ -168,6 +169,7 @@ class OutboxService {
         'name',
         'factor',
         'primary',
+        'salePriceMinor',
         'updatedAt',
       },
       'ProductUnitDeleted': {'id', 'productId', 'deletedAt'},
@@ -349,5 +351,10 @@ class OutboxService {
     }
 
     checkKeys(payload);
+    if ((eventType == 'ProductUnitCreated' ||
+            eventType == 'ProductUnitUpdated') &&
+        (payload['salePriceMinor'] as int) < 0) {
+      throw ArgumentError('salePriceMinor must be non-negative');
+    }
   }
 }

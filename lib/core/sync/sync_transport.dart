@@ -105,13 +105,79 @@ class SyncPullBatch {
 class SyncBootstrap {
   const SyncBootstrap({
     required this.serverSequence,
+    required this.snapshotCompleteness,
+    required this.replayFromSequence,
+    required this.earliestAvailableSequence,
+    required this.fullReplayAvailable,
     required this.snapshotVersion,
     required this.snapshot,
   });
 
   final int serverSequence;
+  final String snapshotCompleteness;
+  final int replayFromSequence;
+  final int? earliestAvailableSequence;
+  final bool fullReplayAvailable;
   final int snapshotVersion;
   final Map<String, dynamic> snapshot;
+
+  factory SyncBootstrap.fromJson(Map<String, dynamic> json) {
+    final snapshot = json['snapshot'];
+    if (snapshot is! Map) {
+      throw const FormatException('snapshot must be an object.');
+    }
+    final response = SyncBootstrap(
+      serverSequence: _strictJsonInt(json, 'serverSequence'),
+      snapshotCompleteness: _requiredString(json, 'snapshotCompleteness'),
+      replayFromSequence: _strictJsonInt(json, 'replayFromSequence'),
+      earliestAvailableSequence: _nullableStrictJsonInt(
+        json,
+        'earliestAvailableSequence',
+      ),
+      fullReplayAvailable: _strictJsonBool(json, 'fullReplayAvailable'),
+      snapshotVersion: _strictJsonInt(json, 'snapshotVersion'),
+      snapshot: Map<String, dynamic>.from(snapshot),
+    );
+    response.validate();
+    return response;
+  }
+
+  void validate() {
+    if (serverSequence < 0 || replayFromSequence < 0) {
+      throw const FormatException(
+        'Bootstrap sequences must be non-negative integers.',
+      );
+    }
+    if (snapshotCompleteness != 'PARTIAL') {
+      throw FormatException(
+        'Unsupported snapshotCompleteness: $snapshotCompleteness.',
+      );
+    }
+    if (!fullReplayAvailable) {
+      throw const FormatException(
+        'Bootstrap is PARTIAL but fullReplayAvailable is false; '
+        'a new device cannot be restored safely.',
+      );
+    }
+    if (replayFromSequence > serverSequence) {
+      throw const FormatException(
+        'replayFromSequence cannot exceed bootstrap serverSequence.',
+      );
+    }
+    final earliest = earliestAvailableSequence;
+    if (earliest != null) {
+      if (earliest < 1 || earliest > serverSequence) {
+        throw const FormatException(
+          'earliestAvailableSequence is outside the bootstrap watermark.',
+        );
+      }
+      if (replayFromSequence >= earliest) {
+        throw const FormatException(
+          'replayFromSequence would skip the earliest available event.',
+        );
+      }
+    }
+  }
 }
 
 class RemoteSyncStatus {
@@ -176,4 +242,23 @@ int _requiredInt(Map<String, dynamic> json, String key) {
 int? _optionalInt(Object? value) {
   if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '');
+}
+
+int _strictJsonInt(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value is! int) throw FormatException('$key must be an integer.');
+  return value;
+}
+
+int? _nullableStrictJsonInt(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is! int) throw FormatException('$key must be an integer or null.');
+  return value;
+}
+
+bool _strictJsonBool(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value is! bool) throw FormatException('$key must be a boolean.');
+  return value;
 }

@@ -1,5 +1,9 @@
 # متطلبات تهيئة جهاز جديد — Sync v1
 
+> تحديث 2026-09-25: اعتمد الباك الخيار A في Sync Contract v1.1 وأضاف
+> `snapshotCompleteness` و`replayFromSequence` و`earliestAvailableSequence`
+> و`fullReplayAvailable`. تم تنفيذ قراءتها والتحقق منها في Flutter.
+
 ## المشكلة المثبتة
 
 `GET /sync/bootstrap` في العقد الحالي يعيد snapshot للصناديق فقط، مع

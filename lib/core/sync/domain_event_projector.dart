@@ -157,7 +157,11 @@ class SqliteDomainEventProjector implements DomainEventProjector {
         'name': _s(e, 'name'),
         'factor': _n(e, 'factor'),
         'is_primary': e.payload['primary'] == true ? 1 : 0,
-        'sale_price_minor': 0,
+        'sale_price_minor': _optionalNonNegativeInt(
+          e,
+          'salePriceMinor',
+          historicalDefault: 0,
+        ),
         'updated_at': _s(e, 'updatedAt'),
         'deleted_at': null,
       };
@@ -1247,6 +1251,19 @@ class SqliteDomainEventProjector implements DomainEventProjector {
     final v = e.payload[k];
     if (v is! int) throw FormatException('${e.eventType}.$k must be integer');
     return v;
+  }
+
+  int _optionalNonNegativeInt(
+    DomainEvent e,
+    String k, {
+    required int historicalDefault,
+  }) {
+    if (!e.payload.containsKey(k)) return historicalDefault;
+    final value = _i(e, k);
+    if (value < 0) {
+      throw FormatException('${e.eventType}.$k must be non-negative');
+    }
+    return value;
   }
 
   int _positive(DomainEvent e, String k) {

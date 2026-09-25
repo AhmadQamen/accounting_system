@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
-import 'package:accounting_system/features/master_data/data/master_data_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -65,20 +64,66 @@ void main() {
     },
   );
 
-  test(
-    'nonzero product unit price is blocked until catalog supports it',
-    () async {
-      final repository = MasterDataRepository(AppDatabase.instance);
+  test('product unit create and update preserve integer sale price', () async {
+    final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+    addTearDown(db.close);
+    await AppDatabase.instance.createSchema(db, AppDatabase.dbVersion);
+    const outbox = OutboxService();
 
-      await expectLater(
-        repository.createProduct(
-          name: 'Priced product',
-          salePriceMinor: 125000,
-        ),
-        throwsA(isA<ProductUnitSalePriceContractException>()),
+    for (final entry in const [
+      ('ProductUnitCreated', 125000),
+      ('ProductUnitUpdated', 987654321),
+    ]) {
+      await outbox.enqueueEvent(
+        db,
+        entityId: 'entity-price',
+        aggregateType: 'product_unit',
+        aggregateId: 'unit-price',
+        eventType: entry.$1,
+        aggregateVersion: 1,
+        occurredAt: DateTime.utc(2026),
+        payload: {
+          'id': 'unit-price',
+          'productId': 'product-price',
+          'name': 'Unit',
+          'factor': 1.0,
+          'primary': true,
+          'salePriceMinor': entry.$2,
+          'updatedAt': '2026-01-01T00:00:00Z',
+        },
       );
-    },
-  );
+    }
+
+    final rows = await db.query('sync_outbox', orderBy: 'aggregate_version');
+    final prices = rows.map((row) {
+      final payload = jsonDecode(row['payload_json'] as String) as Map;
+      expect(payload['salePriceMinor'], isA<int>());
+      return payload['salePriceMinor'];
+    });
+    expect(prices, [125000, 987654321]);
+
+    await expectLater(
+      outbox.enqueueEvent(
+        db,
+        entityId: 'entity-price',
+        aggregateType: 'product_unit',
+        aggregateId: 'unit-negative',
+        eventType: 'ProductUnitCreated',
+        aggregateVersion: 1,
+        occurredAt: DateTime.utc(2026),
+        payload: const {
+          'id': 'unit-negative',
+          'productId': 'product-price',
+          'name': 'Unit',
+          'factor': 1.0,
+          'primary': false,
+          'salePriceMinor': -1,
+          'updatedAt': '2026-01-01T00:00:00Z',
+        },
+      ),
+      throwsArgumentError,
+    );
+  });
 
   test(
     'aggregate event versions advance independently from projection versions',

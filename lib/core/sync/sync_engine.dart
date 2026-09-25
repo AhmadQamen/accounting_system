@@ -162,9 +162,17 @@ class SyncEngine {
       entityId: context.entityId,
       deviceId: context.deviceId,
     );
+    response.validate();
     if (response.snapshotVersion != 1) {
       throw FormatException(
         'Unsupported bootstrap snapshot version ${response.snapshotVersion}.',
+      );
+    }
+    final storedCursor = await _readCursor(db, context.entityId);
+    if (!rebuild && storedCursor > response.serverSequence) {
+      throw FormatException(
+        'Stored cursor $storedCursor is beyond bootstrap watermark '
+        '${response.serverSequence}; initialization was not changed.',
       );
     }
     final cashboxes = response.snapshot['cashboxes'];
@@ -230,9 +238,16 @@ class SyncEngine {
         }
       }
 
-      // Snapshot v1 contains cashboxes only. It is not a complete business
+      // Snapshot v1.1 contains cashboxes only. It is not a complete business
       // snapshot, so its sequence is a completeness target, never a cursor.
-      // A new/rebuilt device must replay pull from sequence zero.
+      // A new/rebuilt device must replay from the server-declared sequence.
+      final currentCursor = await _readCursor(transaction, context.entityId);
+      final replayCursor =
+          rebuild
+              ? response.replayFromSequence
+              : currentCursor > response.replayFromSequence
+              ? currentCursor
+              : response.replayFromSequence;
       await transaction.update(
         'sync_entity_state',
         {
@@ -247,8 +262,8 @@ class SyncEngine {
       await transaction.update(
         'sync_cursors',
         {
-          'server_sequence': 0,
-          'last_acknowledged_sequence': 0,
+          'server_sequence': replayCursor,
+          if (rebuild) 'last_acknowledged_sequence': 0,
           'updated_at': now,
         },
         where: 'entity_id=?',
@@ -445,7 +460,16 @@ class SyncEngine {
       if (batch.lastServerSequence < cursor) {
         throw const FormatException('Pull cursor moved backwards.');
       }
+      final maxEventSequence = batch.events
+          .map((event) => event.serverSequence ?? -1)
+          .fold<int>(-1, (max, value) => value > max ? value : max);
+      if (maxEventSequence > batch.lastServerSequence) {
+        throw const FormatException(
+          'Pull page contains an event beyond lastServerSequence.',
+        );
+      }
       await db.transaction((transaction) async {
+        var previousNewSequence = cursor;
         for (final event in batch.events) {
           final sequence = event.serverSequence;
           if (sequence == null) {
@@ -459,6 +483,12 @@ class SyncEngine {
             limit: 1,
           );
           if (existing.isEmpty) {
+            if (sequence <= previousNewSequence) {
+              throw const FormatException(
+                'New pull events must be ordered by increasing serverSequence.',
+              );
+            }
+            previousNewSequence = sequence;
             await _projector.apply(
               transaction,
               entityId: context.entityId,
@@ -566,7 +596,7 @@ class SyncEngine {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<int> _readCursor(Database db, String entityId) async {
+  Future<int> _readCursor(DatabaseExecutor db, String entityId) async {
     final rows = await db.query(
       'sync_cursors',
       columns: ['server_sequence'],

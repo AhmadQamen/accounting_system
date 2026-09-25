@@ -17,13 +17,7 @@ class ApiSyncTransport implements SyncTransport {
       queryParams: {'entityId': entityId, 'deviceId': deviceId},
       parseResponse: (data) {
         final json = Map<String, dynamic>.from(data as Map);
-        return SyncBootstrap(
-          serverSequence: (json['serverSequence'] as num).toInt(),
-          snapshotVersion: (json['snapshotVersion'] as num?)?.toInt() ?? 1,
-          snapshot: Map<String, dynamic>.from(
-            json['snapshot'] as Map? ?? const {},
-          ),
-        );
+        return SyncBootstrap.fromJson(json);
       },
     );
   }
