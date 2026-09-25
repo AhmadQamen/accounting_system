@@ -111,7 +111,11 @@ CREATE TABLE IF NOT EXISTS legacy_sync_quarantine (
   legacy_status TEXT,
   legacy_created_at TEXT,
   quarantine_reason TEXT NOT NULL,
-  quarantined_at TEXT NOT NULL
+  quarantined_at TEXT NOT NULL,
+  review_status TEXT NOT NULL DEFAULT 'pending_review'
+    CHECK(review_status IN ('pending_review','kept_local','discarded')),
+  reviewed_at TEXT,
+  resolution_note TEXT
 )
 ''',
   '''

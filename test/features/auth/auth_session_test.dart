@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/utils/api_client.dart';
+import 'package:accounting_system/core/errors/exceptions.dart';
 import 'package:accounting_system/features/auth/data/auth_repository.dart';
 import 'package:accounting_system/features/auth/data/auth_session_manager.dart';
 import 'package:accounting_system/features/auth/data/token_storage.dart';
@@ -139,6 +140,51 @@ void main() {
   });
 
   group('membership selection', () {
+    test(
+      'reopens activated organization offline without registration',
+      () async {
+        const membership = Membership(
+          membershipId: 'membership-offline',
+          entityId: 'entity-offline',
+          entityName: 'Offline Entity',
+          currencyCode: 'USD',
+          timezone: 'UTC',
+          role: 'OWNER',
+        );
+        const cachedUser = AuthUser(
+          id: 'user-offline',
+          name: 'Offline User',
+          email: '',
+          memberships: [membership],
+        );
+        final dio = Dio();
+        addTearDown(dio.close);
+        final activator = FakeOrganizationActivator();
+        final notifier = AuthNotifier(
+          repository: FakeAuthRepository(
+            loginUser: cachedUser,
+            cachedUser: cachedUser,
+            restoreError: const NetworkException('offline'),
+          ),
+          sessionManager: AuthSessionManager(
+            dio: dio,
+            tokenStorage: MemoryTokenStorage(
+              const AuthTokens(accessToken: 'cached', refreshToken: 'cached-r'),
+            ),
+          ),
+          organizationActivator: activator,
+        );
+        addTearDown(notifier.dispose);
+
+        await notifier.initialize();
+
+        expect(notifier.status, AuthStatus.authenticated);
+        expect(notifier.selectedMembership?.entityId, 'entity-offline');
+        expect(notifier.errorMessage, contains('دون اتصال'));
+        expect(activator.calls, 0);
+      },
+    );
+
     test('does not silently choose among multiple memberships', () async {
       final user = AuthUser(
         id: 'user-1',
@@ -247,10 +293,17 @@ class MemoryTokenStorage implements TokenStorage {
 }
 
 class FakeAuthRepository implements AuthRepository {
-  FakeAuthRepository({required this.loginUser, this.restoredUser});
+  FakeAuthRepository({
+    required this.loginUser,
+    this.restoredUser,
+    this.cachedUser,
+    this.restoreError,
+  });
 
   final AuthUser loginUser;
   final AuthUser? restoredUser;
+  final AuthUser? cachedUser;
+  final Object? restoreError;
 
   @override
   Future<AuthUser> fetchCurrentUser() async => loginUser;
@@ -265,19 +318,27 @@ class FakeAuthRepository implements AuthRepository {
   Future<void> logout() async {}
 
   @override
-  Future<AuthUser?> restoreSession() async => restoredUser;
+  Future<AuthUser?> restoreSession() async {
+    if (restoreError != null) throw restoreError!;
+    return restoredUser;
+  }
+
+  @override
+  Future<AuthUser?> restoreCachedSession() async => cachedUser ?? restoredUser;
 }
 
 class FakeOrganizationActivator implements OrganizationActivator {
   FakeOrganizationActivator({this.revoked = false});
 
   final bool revoked;
+  int calls = 0;
 
   @override
   Future<OrganizationActivationResult> activate({
     required AuthUser user,
     required Membership membership,
   }) async {
+    calls++;
     return OrganizationActivationResult(
       deviceId: 'device-test',
       revoked: revoked,

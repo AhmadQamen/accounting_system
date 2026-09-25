@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
+import 'package:accounting_system/features/master_data/data/master_data_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -60,6 +61,21 @@ void main() {
           'outTransactionId',
           'inTransactionId',
         ]),
+      );
+    },
+  );
+
+  test(
+    'nonzero product unit price is blocked until catalog supports it',
+    () async {
+      final repository = MasterDataRepository(AppDatabase.instance);
+
+      await expectLater(
+        repository.createProduct(
+          name: 'Priced product',
+          salePriceMinor: 125000,
+        ),
+        throwsA(isA<ProductUnitSalePriceContractException>()),
       );
     },
   );

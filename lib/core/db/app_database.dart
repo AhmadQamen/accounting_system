@@ -20,7 +20,7 @@ class AppDatabase {
 
   static const dbName = 'accounting_system.db';
   static const legacyDbName = 'pharma_x.db';
-  static const dbVersion = 9;
+  static const dbVersion = 10;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -129,6 +129,49 @@ WHERE sale_price_minor = 0
     }
     if (oldVersion < 9) {
       await createSyncSchema(db);
+    }
+    if (oldVersion < 10 && newVersion >= 10) {
+      await createSyncSchema(db);
+      await _ensureColumn(
+        db,
+        'legacy_sync_quarantine',
+        'review_status',
+        "TEXT NOT NULL DEFAULT 'pending_review'",
+      );
+      await _ensureColumn(db, 'legacy_sync_quarantine', 'reviewed_at', 'TEXT');
+      await _ensureColumn(
+        db,
+        'legacy_sync_quarantine',
+        'resolution_note',
+        'TEXT',
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      // v8/v9 treated the cashbox-only bootstrap snapshot as complete and
+      // skipped older events. Replaying from zero is safe because sync_changes
+      // deduplicates already applied eventIds.
+      await db.update('sync_entity_state', {
+        'bootstrap_completed': 0,
+        'updated_at': now,
+      });
+      await db.update('sync_cursors', {
+        'server_sequence': 0,
+        'last_acknowledged_sequence': 0,
+        'updated_at': now,
+      });
+      await db.insert('migration_reports', {
+        'migration_key': 'v10_replay_partial_bootstrap_history',
+        'affected_rows':
+            Sqflite.firstIntValue(
+              await db.rawQuery('SELECT COUNT(*) FROM sync_entity_state'),
+            ) ??
+            0,
+        'details': jsonEncode({
+          'reason': 'Bootstrap v1 contains cashboxes only',
+          'action':
+              'Reset cursor to zero; preserve projections and deduplicate by eventId',
+        }),
+        'created_at': now,
+      });
     }
   }
 
@@ -259,7 +302,65 @@ FROM sync_outbox_v6_archive
     }
   }
 
+  Future<List<String>> deletionBlockers() async {
+    final db = await database;
+    return deletionBlockersFor(db);
+  }
+
+  Future<List<String>> deletionBlockersFor(Database db) async {
+    final blockers = <String>[];
+    final outbox =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM sync_outbox'),
+        ) ??
+        0;
+    if (outbox > 0) blockers.add('$outbox حدث مزامنة غير محسوم');
+    final legacy =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) FROM legacy_sync_quarantine WHERE review_status='pending_review'",
+          ),
+        ) ??
+        0;
+    if (legacy > 0) blockers.add('$legacy عملية قديمة معزولة بانتظار المراجعة');
+    var drafts = 0;
+    for (final table in const [
+      'sales',
+      'purchase_invoices',
+      'sale_return_invoices',
+      'purchase_return_invoices',
+      'waste_invoices',
+      'inventory_adjustments',
+      'inventory_transfers',
+      'expenses',
+      'cash_transfers',
+    ]) {
+      final exists =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+              [table],
+            ),
+          ) ??
+          0;
+      if (exists == 0) continue;
+      drafts +=
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              "SELECT COUNT(*) FROM $table WHERE status='draft'",
+            ),
+          ) ??
+          0;
+    }
+    if (drafts > 0) blockers.add('$drafts مسودة محلية غير مرحّلة');
+    return blockers;
+  }
+
   Future<void> deleteDB() async {
+    final blockers = await deletionBlockers();
+    if (blockers.isNotEmpty) {
+      throw DatabaseDeletionBlockedException(blockers);
+    }
     _configureFactoryForPlatform();
     final dbPath = await getPath;
     await close();
@@ -294,4 +395,15 @@ FROM sync_outbox_v6_archive
     await targetFile.parent.create(recursive: true);
     await legacyFile.copy(target);
   }
+}
+
+class DatabaseDeletionBlockedException implements Exception {
+  const DatabaseDeletionBlockedException(this.reasons);
+
+  final List<String> reasons;
+
+  @override
+  String toString() =>
+      'تعذر حذف البيانات المحلية حتى لا تفقد بيانات غير مستعادة:\n'
+      '${reasons.map((reason) => '• $reason').join('\n')}';
 }

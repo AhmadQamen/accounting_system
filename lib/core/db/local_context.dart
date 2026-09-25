@@ -291,7 +291,7 @@ LIMIT 1
       limit: 1,
     );
     if (rows.isNotEmpty) return rows.first['id']! as String;
-    final id = uuid.v4();
+    final id = deterministicContextId(entityId, 'financial-year-${now.year}');
     await txn.insert('financial_years', {
       'id': id,
       'entity_id': entityId,
@@ -318,7 +318,7 @@ LIMIT 1
       limit: 1,
     );
     if (rows.isNotEmpty) return rows.first['id']! as String;
-    final id = uuid.v4();
+    final id = deterministicContextId(entityId, 'default-warehouse');
     await txn.insert('warehouses', {
       'id': id,
       'entity_id': entityId,
@@ -342,7 +342,7 @@ LIMIT 1
       limit: 1,
     );
     if (rows.isNotEmpty) return rows.first['id']! as String;
-    final id = uuid.v4();
+    final id = deterministicContextId(entityId, 'default-cashbox');
     await txn.insert('cashboxes', {
       'id': id,
       'entity_id': entityId,
@@ -355,3 +355,9 @@ LIMIT 1
 
   void clearCache() => _cached = null;
 }
+
+/// Stable fallback IDs are required because v1 has no financial-year event
+/// and its bootstrap has no warehouse snapshot. Every new device therefore
+/// creates the same dependency IDs for the same organization.
+String deterministicContextId(String entityId, String dependency) =>
+    uuid.v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', '$entityId:$dependency');

@@ -2,12 +2,15 @@ import 'package:accounting_system/core/network/api_endpoints.dart';
 import 'package:accounting_system/core/utils/api_client.dart';
 import 'package:accounting_system/features/auth/data/auth_session_manager.dart';
 import 'package:accounting_system/features/auth/domain/models/auth_models.dart';
+import 'package:accounting_system/core/db/local_context.dart';
+import 'package:accounting_system/core/db/app_database.dart';
 import 'package:dio/dio.dart';
 
 abstract interface class AuthRepository {
   Future<AuthUser> login({required String email, required String password});
   Future<AuthUser> fetchCurrentUser();
   Future<AuthUser?> restoreSession();
+  Future<AuthUser?> restoreCachedSession();
   Future<void> logout();
 }
 
@@ -55,6 +58,40 @@ class ApiAuthRepository implements AuthRepository {
   Future<AuthUser?> restoreSession() async {
     if (await _sessionManager.readTokens() == null) return null;
     return fetchCurrentUser();
+  }
+
+  @override
+  Future<AuthUser?> restoreCachedSession() async {
+    if (await _sessionManager.readTokens() == null) return null;
+    try {
+      final context = await LocalContextService.instance.current;
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query(
+        'users',
+        columns: ['name', 'email'],
+        where: 'id=? AND entity_id=?',
+        whereArgs: [context.userId, context.entityId],
+        limit: 1,
+      );
+      final localUser = rows.isEmpty ? const <String, Object?>{} : rows.first;
+      return AuthUser(
+        id: context.serverUserId,
+        name: localUser['name']?.toString() ?? context.entityName,
+        email: localUser['email']?.toString() ?? '',
+        memberships: [
+          Membership(
+            membershipId: context.membershipId,
+            entityId: context.entityId,
+            entityName: context.entityName,
+            currencyCode: context.currencyCode,
+            timezone: context.timezone,
+            role: context.role,
+          ),
+        ],
+      );
+    } on LocalContextUnavailableException {
+      return null;
+    }
   }
 
   @override

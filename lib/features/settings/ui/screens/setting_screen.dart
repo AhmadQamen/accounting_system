@@ -151,6 +151,8 @@ class SettingsScreen extends ConsumerWidget {
                               subtitle:
                                   s.deviceRevoked
                                       ? 'ألغت الإدارة هذا الجهاز؛ المزامنة متوقفة'
+                                      : !s.initializationComplete
+                                      ? 'البيانات المحلية متاحة، لكن استعادة تاريخ المؤسسة لم تكتمل بعد'
                                       : s.lastError != null
                                       ? 'لم تكتمل آخر مزامنة: ${s.lastError}'
                                       : rejected > 0
@@ -178,6 +180,25 @@ class SettingsScreen extends ConsumerWidget {
                                         : pending > 0
                                         ? Iconsax.refresh
                                         : Iconsax.tick_circle,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              s.initializationComplete
+                                  ? 'الحفظ محلي وفوري. المزامنة مع الخادم مكتملة حتى آخر وقت ظاهر أدناه.'
+                                  : 'الحفظ المحلي لا يعني وصول البيانات لبقية الأجهزة. شغّل المزامنة يدويًا بعد عودة الاتصال.',
+                              style: TextStyle(
+                                color: context.colors.textSecondary,
+                                fontWeight: FontWeight.w700,
+                                height: 1.5,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'الوضع الحالي: المزامنة يدوية من هذا الزر؛ لا تعمل تلقائيًا في الخلفية.',
+                              style: TextStyle(
+                                color: context.colors.textDim,
+                                fontSize: 11,
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -534,10 +555,28 @@ class SettingsScreen extends ConsumerWidget {
           ),
     );
     if (ok == true) {
-      await AppDatabase.instance.deleteDB();
-      LocalContextService.instance.clearCache();
-      ref.invalidate(localContextProvider);
-      ref.read(dataRevisionProvider.notifier).state++;
+      try {
+        await AppDatabase.instance.deleteDB();
+        LocalContextService.instance.clearCache();
+        ref.invalidate(localContextProvider);
+        ref.read(dataRevisionProvider.notifier).state++;
+      } on DatabaseDeletionBlockedException catch (error) {
+        if (!context.mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder:
+              (dialogContext) => AlertDialog(
+                title: const Text('تعذر حذف البيانات بأمان'),
+                content: Text(error.toString()),
+                actions: [
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('حسنًا'),
+                  ),
+                ],
+              ),
+        );
+      }
     }
   }
 }

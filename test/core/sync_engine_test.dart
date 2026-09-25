@@ -108,17 +108,109 @@ void main() {
     expect(await fixture.db.query('sync_operations'), hasLength(4));
   });
 
-  test('bootstrap runs once and hands pull its server sequence', () async {
+  test('partial bootstrap replays history from zero and runs once', () async {
     final fixture = await _fixture();
     addTearDown(fixture.db.close);
     fixture.transport.bootstrapSequence = 37;
+    fixture.transport.pullBatches.add(
+      const SyncPullBatch(events: [], lastServerSequence: 37, hasMore: false),
+    );
 
     await fixture.engine.syncNow();
     await fixture.engine.syncNow();
 
     expect(fixture.transport.bootstrapCalls, 1);
-    expect(fixture.transport.pullAfter, [37, 37]);
+    expect(fixture.transport.pullAfter, [0, 37]);
   });
+
+  test(
+    'incomplete initial replay sends no ack and remains uninitialized',
+    () async {
+      final fixture = await _fixture();
+      addTearDown(fixture.db.close);
+      fixture.transport.bootstrapSequence = 37;
+
+      await expectLater(
+        fixture.engine.syncNow(),
+        throwsA(isA<IncompleteInitialSyncException>()),
+      );
+
+      expect(fixture.transport.pullAfter, [0]);
+      expect(fixture.transport.acks, isEmpty);
+      final state = (await fixture.db.query('sync_entity_state')).single;
+      expect(state['bootstrap_completed'], 0);
+      expect(state['last_sync_at'], isNull);
+    },
+  );
+
+  test(
+    'new device restores complete history after cashbox-only bootstrap',
+    () async {
+      final server = _MemoryEventServer();
+      final a = await _deviceFixture(server, 'device-a');
+      final events = _secondDeviceEvents();
+      const projector = SqliteDomainEventProjector();
+
+      for (final event in events) {
+        await a.db.transaction((txn) async {
+          await projector.apply(txn, entityId: 'entity-test', event: event);
+          await const OutboxService().enqueueEvent(
+            txn,
+            entityId: 'entity-test',
+            aggregateType: event.aggregateType,
+            aggregateId: event.aggregateId,
+            eventType: event.eventType,
+            aggregateVersion: event.aggregateVersion,
+            occurredAt: DateTime.parse(event.occurredAt),
+            payload: event.payload,
+            eventId: event.eventId,
+          );
+        });
+      }
+
+      await a.engine.syncNow();
+      final aInventory =
+          (await a.db.query('inventory_items')).single['current_quantity'];
+      final aCash =
+          (await a.db.query(
+            'cashboxes',
+            where: 'id=?',
+            whereArgs: ['cashbox-remote'],
+          )).single['current_balance_minor'];
+      final aParty =
+          (await a.db.query('parties')).single['current_balance_minor'];
+      await a.db.close();
+
+      final b = await _deviceFixture(server, 'device-b');
+      addTearDown(b.db.close);
+      await b.engine.syncNow();
+
+      expect(server.pullAfterByDevice['device-b']?.first, 0);
+      expect(await b.db.query('products'), hasLength(1));
+      expect(await b.db.query('parties'), hasLength(1));
+      expect(await b.db.query('sales'), hasLength(1));
+      expect(
+        (await b.db.query('inventory_items')).single['current_quantity'],
+        aInventory,
+      );
+      expect(
+        (await b.db.query(
+          'cashboxes',
+          where: 'id=?',
+          whereArgs: ['cashbox-remote'],
+        )).single['current_balance_minor'],
+        aCash,
+      );
+      expect(
+        (await b.db.query('parties')).single['current_balance_minor'],
+        aParty,
+      );
+      expect(
+        (await b.db.query('sync_entity_state')).single['bootstrap_completed'],
+        1,
+      );
+    },
+  );
 
   test(
     'second device builds sale, payment and reversal ledgers once',
@@ -435,6 +527,40 @@ Future<_Fixture> _fixture({DomainEventProjector? projector}) async {
   return _Fixture(db, transport, engine);
 }
 
+Future<_DeviceFixture> _deviceFixture(
+  _MemoryEventServer transport,
+  String deviceId,
+) async {
+  final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+  await AppDatabase.instance.createSchema(db, AppDatabase.dbVersion);
+  final contexts = LocalContextService(databaseProvider: () async => db);
+  await contexts.activateAuthenticatedContext(
+    entityId: 'entity-test',
+    entityName: 'Test Entity',
+    currencyCode: 'USD',
+    timezone: 'UTC',
+    membershipId: 'membership-test',
+    role: 'owner',
+    serverUserId: 'user-test',
+    userName: 'Test User',
+    userEmail: 'test@example.invalid',
+    deviceId: deviceId,
+    deviceKey: 'key-$deviceId',
+    deviceName: deviceId,
+    platform: 'test',
+    appVersion: '1.0.0',
+    deviceRevoked: false,
+  );
+  return _DeviceFixture(
+    db,
+    SyncEngine(
+      transport: transport,
+      databaseProvider: () async => db,
+      contextProvider: () => contexts.current,
+    ),
+  );
+}
+
 Future<void> _event(Database db, String id) =>
     const OutboxService().enqueueEvent(
       db,
@@ -478,6 +604,118 @@ class _Fixture {
   final Database db;
   final _FakeTransport transport;
   final SyncEngine engine;
+}
+
+class _DeviceFixture {
+  const _DeviceFixture(this.db, this.engine);
+  final Database db;
+  final SyncEngine engine;
+}
+
+class _MemoryEventServer implements SyncTransport {
+  final List<DomainEvent> events = [];
+  final Map<String, List<int>> pullAfterByDevice = {};
+
+  @override
+  Future<SyncBootstrap> bootstrap({
+    required String entityId,
+    required String deviceId,
+  }) async => SyncBootstrap(
+    serverSequence: events.length,
+    snapshotVersion: 1,
+    snapshot: const {
+      'cashboxes': [
+        {
+          'id': 'cashbox-remote',
+          'name': 'Remote Cashbox',
+          'current_balance_minor': 0,
+          'snapshot_version': 1,
+        },
+      ],
+    },
+  );
+
+  @override
+  Future<List<SyncPushResult>> push({
+    required String entityId,
+    required String deviceId,
+    required List<DomainEvent> events,
+  }) async {
+    final results = <SyncPushResult>[];
+    for (final event in events) {
+      final existing = this.events.indexWhere(
+        (e) => e.eventId == event.eventId,
+      );
+      if (existing >= 0) {
+        results.add(
+          SyncPushResult(
+            eventId: event.eventId,
+            status: 'ALREADY_ACCEPTED',
+            serverSequence: existing + 1,
+          ),
+        );
+        continue;
+      }
+      final sequence = this.events.length + 1;
+      this.events.add(
+        DomainEvent(
+          eventId: event.eventId,
+          aggregateType: event.aggregateType,
+          aggregateId: event.aggregateId,
+          eventType: event.eventType,
+          aggregateVersion: event.aggregateVersion,
+          occurredAt: event.occurredAt,
+          payload: event.payload,
+          serverSequence: sequence,
+        ),
+      );
+      results.add(
+        SyncPushResult(
+          eventId: event.eventId,
+          status: 'ACCEPTED',
+          serverSequence: sequence,
+        ),
+      );
+    }
+    return results;
+  }
+
+  @override
+  Future<SyncPullBatch> pull({
+    required String entityId,
+    required String deviceId,
+    required int afterServerSequence,
+    int limit = 500,
+  }) async {
+    pullAfterByDevice.putIfAbsent(deviceId, () => []).add(afterServerSequence);
+    final page = events
+        .where((event) => event.serverSequence! > afterServerSequence)
+        .take(limit)
+        .toList(growable: false);
+    final last = page.isEmpty ? afterServerSequence : page.last.serverSequence!;
+    return SyncPullBatch(
+      events: page,
+      lastServerSequence: last,
+      hasMore: events.any((event) => event.serverSequence! > last),
+    );
+  }
+
+  @override
+  Future<void> ack({
+    required String entityId,
+    required String deviceId,
+    required int serverSequence,
+  }) async {}
+
+  @override
+  Future<RemoteSyncStatus> status({
+    required String entityId,
+    required String deviceId,
+  }) async => RemoteSyncStatus(
+    deviceRevoked: false,
+    latestServerSequence: events.length,
+    lastPulledSequence: 0,
+  );
 }
 
 class _FakeTransport implements SyncTransport {

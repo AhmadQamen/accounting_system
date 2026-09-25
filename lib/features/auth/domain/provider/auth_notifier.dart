@@ -58,8 +58,20 @@ class AuthNotifier extends ChangeNotifier {
         await _applyUser(user);
       }
     } catch (error) {
-      _errorMessage = _messageFor(error);
-      _status = AuthStatus.unauthenticated;
+      final cached =
+          _isOfflineError(error)
+              ? await _repository.restoreCachedSession()
+              : null;
+      if (cached != null && cached.memberships.isNotEmpty) {
+        _user = cached;
+        _selectedMembership = cached.memberships.single;
+        _status = AuthStatus.authenticated;
+        _errorMessage =
+            'يعمل التطبيق دون اتصال؛ البيانات محلية حتى نجاح المزامنة.';
+      } else {
+        _errorMessage = _messageFor(error);
+        _status = AuthStatus.unauthenticated;
+      }
     }
     notifyListeners();
   }
@@ -186,6 +198,10 @@ class AuthNotifier extends ChangeNotifier {
     }
     return 'حدث خطأ غير متوقع. حاول مرة أخرى.';
   }
+
+  bool _isOfflineError(Object error) =>
+      error is NetworkException ||
+      (error is DioException && error.response == null);
 
   @override
   void dispose() {

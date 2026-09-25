@@ -16,6 +16,104 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
+  test('fallback dependency ids are stable across devices', () {
+    expect(
+      deterministicContextId('entity-a', 'default-warehouse'),
+      deterministicContextId('entity-a', 'default-warehouse'),
+    );
+    expect(
+      deterministicContextId('entity-a', 'default-warehouse'),
+      isNot(deterministicContextId('entity-b', 'default-warehouse')),
+    );
+    expect(
+      deterministicContextId('entity-a', 'default-cashbox'),
+      isNot(deterministicContextId('entity-a', 'default-warehouse')),
+    );
+  });
+
+  test('v10 resets unsafe partial-bootstrap cursor for full replay', () async {
+    final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+    addTearDown(db.close);
+    await AppDatabase.instance.createSchema(db, AppDatabase.dbVersion);
+    await db.insert('sync_entity_state', {
+      'entity_id': 'entity-replay',
+      'device_id': 'device-replay',
+      'bootstrap_completed': 1,
+      'bootstrap_server_sequence': 42,
+      'updated_at': '2026-01-01T00:00:00Z',
+    });
+    await db.insert('sync_cursors', {
+      'entity_id': 'entity-replay',
+      'device_id': 'device-replay',
+      'server_sequence': 42,
+      'last_acknowledged_sequence': 42,
+      'updated_at': '2026-01-01T00:00:00Z',
+    });
+
+    await AppDatabase.instance.migrate(db, 9, 10);
+
+    final state = (await db.query('sync_entity_state')).single;
+    final cursor = (await db.query('sync_cursors')).single;
+    expect(state['bootstrap_completed'], 0);
+    expect(cursor['server_sequence'], 0);
+    expect(cursor['last_acknowledged_sequence'], 0);
+    expect(
+      await db.query(
+        'migration_reports',
+        where: 'migration_key=?',
+        whereArgs: ['v10_replay_partial_bootstrap_history'],
+      ),
+      hasLength(1),
+    );
+  });
+
+  test(
+    'database deletion is blocked by outbox quarantine and drafts',
+    () async {
+      final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+      addTearDown(db.close);
+      await AppDatabase.instance.createSchema(db, AppDatabase.dbVersion);
+      await db.insert('sync_outbox', {
+        'event_id': 'pending-event',
+        'entity_id': 'entity-a',
+        'aggregate_type': 'party',
+        'aggregate_id': 'party-a',
+        'event_type': 'PartyCreated',
+        'aggregate_version': 1,
+        'occurred_at': '2026-01-01T00:00:00Z',
+        'payload_json': '{}',
+        'created_at': '2026-01-01T00:00:00Z',
+      });
+      await db.insert('legacy_sync_quarantine', {
+        'operation_id': 'legacy-a',
+        'quarantine_reason': 'unmapped',
+        'quarantined_at': '2026-01-01T00:00:00Z',
+      });
+      await db.insert('entities', {
+        'id': 'entity-a',
+        'name': 'Entity',
+        'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-01T00:00:00Z',
+      });
+      await db.insert('sales', {
+        'id': 'draft-a',
+        'entity_id': 'entity-a',
+        'financial_year_id': 'year-a',
+        'invoice_number': 'D-1',
+        'occurred_at': '2026-01-01T00:00:00Z',
+        'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-01T00:00:00Z',
+      });
+
+      final blockers = await AppDatabase.instance.deletionBlockersFor(db);
+
+      expect(blockers, hasLength(3));
+      expect(blockers.join(' '), contains('مزامنة'));
+      expect(blockers.join(' '), contains('معزولة'));
+      expect(blockers.join(' '), contains('مسودة'));
+    },
+  );
+
   test('a new database has event sync and entity context schema', () async {
     final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
     addTearDown(db.close);

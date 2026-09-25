@@ -16,6 +16,22 @@ class DeviceRevokedSyncException implements Exception {
   String toString() => 'تم إلغاء هذا الجهاز؛ المزامنة متوقفة لهذه المؤسسة.';
 }
 
+class IncompleteInitialSyncException implements Exception {
+  const IncompleteInitialSyncException({
+    required this.expectedServerSequence,
+    required this.receivedServerSequence,
+  });
+
+  final int expectedServerSequence;
+  final int receivedServerSequence;
+
+  @override
+  String toString() =>
+      'تعذر إكمال تهيئة الجهاز: الخادم أعلن التسلسل '
+      '$expectedServerSequence لكن السحب وصل إلى $receivedServerSequence فقط. '
+      'لم تُعتمد المزامنة ولم يُرسل ack.';
+}
+
 class SyncEngine {
   SyncEngine({
     required SyncTransport transport,
@@ -91,13 +107,20 @@ class SyncEngine {
       }
 
       final state = await _entityState(db, context.entityId);
-      final bootstrapped = state?['bootstrap_completed'] == 1;
-      if (!bootstrapped || rebuild) {
-        await _bootstrap(db, context, rebuild: rebuild);
+      final initialized = state?['bootstrap_completed'] == 1;
+      int? initializationTarget;
+      if (!initialized || rebuild) {
+        initializationTarget = await _bootstrap(db, context, rebuild: rebuild);
       }
 
       await _pushOutbox(db, context);
       final finalCursor = await _pullAll(db, context);
+      if (initializationTarget != null && finalCursor < initializationTarget) {
+        throw IncompleteInitialSyncException(
+          expectedServerSequence: initializationTarget,
+          receivedServerSequence: finalCursor,
+        );
+      }
       await _transport.ack(
         entityId: context.entityId,
         deviceId: context.deviceId,
@@ -112,7 +135,12 @@ class SyncEngine {
       );
       await db.update(
         'sync_entity_state',
-        {'last_sync_at': now, 'last_error': null, 'updated_at': now},
+        {
+          if (initializationTarget != null) 'bootstrap_completed': 1,
+          'last_sync_at': now,
+          'last_error': null,
+          'updated_at': now,
+        },
         where: 'entity_id=?',
         whereArgs: [context.entityId],
       );
@@ -125,7 +153,7 @@ class SyncEngine {
     }
   }
 
-  Future<void> _bootstrap(
+  Future<int> _bootstrap(
     Database db,
     LocalContext context, {
     required bool rebuild,
@@ -172,9 +200,29 @@ class SyncEngine {
               'created_at': row['updated_at']?.toString() ?? now,
             });
           } else {
+            final ledgerCount =
+                Sqflite.firstIntValue(
+                  await transaction.rawQuery(
+                    'SELECT COUNT(*) FROM transactions '
+                    'WHERE entity_id=? AND cashbox_id=?',
+                    [context.entityId, id],
+                  ),
+                ) ??
+                0;
             await transaction.update(
               'cashboxes',
-              values,
+              {
+                ...values,
+                if (ledgerCount > 0) ...{
+                  // Ledger is authoritative locally. A partial snapshot must
+                  // never overwrite work waiting in the outbox.
+                  'current_balance_minor': await _cashboxLedgerBalance(
+                    transaction,
+                    context.entityId,
+                    id,
+                  ),
+                },
+              },
               where: 'id=? AND entity_id=?',
               whereArgs: [id, context.entityId],
             );
@@ -182,13 +230,13 @@ class SyncEngine {
         }
       }
 
-      // The v1 snapshot is partial: merge only the collections it contains
-      // and never clear unrelated business tables. Its sequence is still the
-      // server's atomic hand-off point for subsequent pull requests.
+      // Snapshot v1 contains cashboxes only. It is not a complete business
+      // snapshot, so its sequence is a completeness target, never a cursor.
+      // A new/rebuilt device must replay pull from sequence zero.
       await transaction.update(
         'sync_entity_state',
         {
-          'bootstrap_completed': 1,
+          'bootstrap_completed': 0,
           'bootstrap_server_sequence': response.serverSequence,
           'updated_at': now,
           'last_error': null,
@@ -199,14 +247,29 @@ class SyncEngine {
       await transaction.update(
         'sync_cursors',
         {
-          'server_sequence': response.serverSequence,
-          if (rebuild) 'last_acknowledged_sequence': 0,
+          'server_sequence': 0,
+          'last_acknowledged_sequence': 0,
           'updated_at': now,
         },
         where: 'entity_id=?',
         whereArgs: [context.entityId],
       );
     });
+    return response.serverSequence;
+  }
+
+  Future<int> _cashboxLedgerBalance(
+    DatabaseExecutor db,
+    String entityId,
+    String cashboxId,
+  ) async {
+    final rows = await db.rawQuery(
+      "SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount_minor "
+      "ELSE -amount_minor END),0) balance FROM transactions "
+      'WHERE entity_id=? AND cashbox_id=?',
+      [entityId, cashboxId],
+    );
+    return ((rows.first['balance'] as num?) ?? 0).toInt();
   }
 
   Future<void> _pushOutbox(Database db, LocalContext context) async {
@@ -466,7 +529,9 @@ class SyncEngine {
       limit: 1,
     );
     final quarantine = await db.rawQuery(
-      'SELECT COUNT(*) c FROM legacy_sync_quarantine',
+      "SELECT COUNT(*) c FROM legacy_sync_quarantine "
+      "WHERE review_status='pending_review' AND (entity_id=? OR entity_id IS NULL)",
+      [entityId],
     );
     return SyncStatus(
       pending: (pending.first['c'] as num).toInt(),
@@ -484,6 +549,7 @@ class SyncEngine {
       quarantinedLegacyOperations: (quarantine.first['c'] as num).toInt(),
       rejected: (rejected.first['c'] as num).toInt(),
       lastError: state?['last_error']?.toString(),
+      initializationComplete: state?['bootstrap_completed'] == 1,
     );
   }
 

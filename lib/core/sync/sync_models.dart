@@ -11,6 +11,7 @@ class SyncStatus {
   final int quarantinedLegacyOperations;
   final int rejected;
   final String? lastError;
+  final bool initializationComplete;
 
   const SyncStatus({
     this.pending = 0,
@@ -22,6 +23,7 @@ class SyncStatus {
     this.quarantinedLegacyOperations = 0,
     this.rejected = 0,
     this.lastError,
+    this.initializationComplete = false,
   });
 
   factory SyncStatus.fromSql(Map<String, Object?> row) => SyncStatus(
@@ -34,6 +36,7 @@ class SyncStatus {
     quarantinedLegacyOperations: intValue(row['quarantined_legacy_operations']),
     rejected: intValue(row['rejected']),
     lastError: row['last_error']?.toString(),
+    initializationComplete: boolValue(row['initialization_complete']),
   );
 
   factory SyncStatus.fromJson(Map<String, dynamic> json) => SyncStatus(
@@ -51,6 +54,9 @@ class SyncStatus {
     ),
     rejected: intValue(json['rejected']),
     lastError: (json['lastError'] ?? json['last_error'])?.toString(),
+    initializationComplete: boolValue(
+      json['initializationComplete'] ?? json['initialization_complete'],
+    ),
   );
 
   Map<String, Object?> toSql() => {
@@ -63,6 +69,7 @@ class SyncStatus {
     'quarantined_legacy_operations': quarantinedLegacyOperations,
     'rejected': rejected,
     'last_error': lastError,
+    'initialization_complete': initializationComplete ? 1 : 0,
   };
 
   Map<String, dynamic> toJson() => {
@@ -75,6 +82,7 @@ class SyncStatus {
     'quarantinedLegacyOperations': quarantinedLegacyOperations,
     'rejected': rejected,
     'lastError': lastError,
+    'initializationComplete': initializationComplete,
   };
 
   SyncStatus copyWith({
@@ -87,6 +95,7 @@ class SyncStatus {
     Object? quarantinedLegacyOperations = unset,
     Object? rejected = unset,
     Object? lastError = unset,
+    Object? initializationComplete = unset,
   }) {
     return SyncStatus(
       pending: pending is Unset ? this.pending : pending as int,
@@ -107,6 +116,10 @@ class SyncStatus {
               : quarantinedLegacyOperations as int,
       rejected: rejected is Unset ? this.rejected : rejected as int,
       lastError: lastError is Unset ? this.lastError : lastError as String?,
+      initializationComplete:
+          initializationComplete is Unset
+              ? this.initializationComplete
+              : initializationComplete as bool,
     );
   }
 }

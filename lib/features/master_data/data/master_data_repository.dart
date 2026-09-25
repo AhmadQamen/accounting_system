@@ -6,6 +6,21 @@ import 'package:accounting_system/features/master_data/models/master_data_models
 import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:sqflite/sqflite.dart';
 
+class ProductUnitSalePriceContractException implements Exception {
+  const ProductUnitSalePriceContractException();
+
+  @override
+  String toString() =>
+      'لا يمكن حفظ سعر البيع الآن: عقد المزامنة v1 لا ينقل سعر وحدة المنتج، '
+      'وحفظه سيجعل السعر صفرًا على الأجهزة الأخرى. يلزم تحديث عقد الباك أولًا.';
+}
+
+void _requireSupportedSalePrice(int salePriceMinor) {
+  if (salePriceMinor != 0) {
+    throw const ProductUnitSalePriceContractException();
+  }
+}
+
 class MasterDataRepository {
   MasterDataRepository(this._database);
   final AppDatabase _database;
@@ -187,6 +202,7 @@ ORDER BY p.name COLLATE NOCASE
     if (salePriceMinor < 0) {
       throw ArgumentError('Sale price must be non-negative');
     }
+    _requireSupportedSalePrice(salePriceMinor);
     final ctx = await LocalContextService.instance.current;
     final now = DateTime.now().toUtc().toIso8601String();
     final productId = uuid.v4();
@@ -291,6 +307,7 @@ ORDER BY p.name COLLATE NOCASE
     if (salePriceMinor < 0) {
       throw ArgumentError('Sale price must be non-negative');
     }
+    _requireSupportedSalePrice(salePriceMinor);
     final ctx = await LocalContextService.instance.current;
     final unitId = id ?? uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -755,6 +772,8 @@ ORDER BY b.code
       whereArgs: [id],
       limit: 1,
     );
-    return (((rows.isEmpty ? null : rows.first['version']) as num?)?.toInt() ?? 0) + 1;
+    return (((rows.isEmpty ? null : rows.first['version']) as num?)?.toInt() ??
+            0) +
+        1;
   }
 }
