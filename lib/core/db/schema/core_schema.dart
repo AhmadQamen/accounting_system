@@ -6,7 +6,7 @@ const coreSchemaStatements = <String>[
 CREATE TABLE IF NOT EXISTS entities (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  currency_code TEXT NOT NULL DEFAULT 'USD',
+  currency_code TEXT NOT NULL DEFAULT 'SYP',
   timezone TEXT NOT NULL DEFAULT 'UTC',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -114,10 +114,25 @@ CREATE TABLE IF NOT EXISTS app_context (
   '''
 CREATE TABLE IF NOT EXISTS keyboard_shortcuts (
   action TEXT PRIMARY KEY,
+  key_id INTEGER NOT NULL DEFAULT 0,
   key_label TEXT NOT NULL,
   ctrl INTEGER NOT NULL DEFAULT 0,
   shift INTEGER NOT NULL DEFAULT 0,
   alt INTEGER NOT NULL DEFAULT 0
+)
+''',
+  '''
+CREATE TABLE IF NOT EXISTS invoice_shortcut_macros (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  key_id INTEGER NOT NULL,
+  key_label TEXT NOT NULL,
+  ctrl INTEGER NOT NULL DEFAULT 0,
+  shift INTEGER NOT NULL DEFAULT 0,
+  alt INTEGER NOT NULL DEFAULT 0,
+  lines_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 )
 ''',
   'CREATE INDEX IF NOT EXISTS idx_users_entity ON users(entity_id)',

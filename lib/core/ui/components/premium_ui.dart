@@ -1,10 +1,10 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
-
 
 /// Whether a feature page should show its own compact AppBar.
 /// Windows is hosted inside [AppShell], which already provides a top bar.
@@ -18,13 +18,27 @@ bool showCompactPageAppBar(BuildContext context) {
   return narrow && !hostedInDesktopShell;
 }
 
-double responsiveDialogWidth(BuildContext context, double preferred, {double edgeInsets = 48}) {
-  final available = math.max(240.0, MediaQuery.sizeOf(context).width - edgeInsets);
+double responsiveDialogWidth(
+  BuildContext context,
+  double preferred, {
+  double edgeInsets = 48,
+}) {
+  final available = math.max(
+    240.0,
+    MediaQuery.sizeOf(context).width - edgeInsets,
+  );
   return math.min(preferred, available);
 }
 
-double responsiveDialogHeight(BuildContext context, double preferred, {double edgeInsets = 48}) {
-  final available = math.max(240.0, MediaQuery.sizeOf(context).height - edgeInsets);
+double responsiveDialogHeight(
+  BuildContext context,
+  double preferred, {
+  double edgeInsets = 48,
+}) {
+  final available = math.max(
+    240.0,
+    MediaQuery.sizeOf(context).height - edgeInsets,
+  );
   return math.min(preferred, available);
 }
 
@@ -45,64 +59,18 @@ class PremiumBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     return Stack(
       fit: StackFit.expand,
       children: [
         DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
-              colors: [
-                colors.bgPage,
-                colors.bgDeep.withValues(alpha: dark ? .88 : .56),
-                colors.bgPage,
-              ],
-              stops: const [0, .58, 1],
-            ),
-          ),
-        ),
-        PositionedDirectional(
-          top: -180,
-          end: -120,
-          child: _AmbientOrb(
-            size: 420,
-            color: colors.primary.withValues(alpha: dark ? .10 : .13),
-          ),
-        ),
-        PositionedDirectional(
-          bottom: -220,
-          start: 90,
-          child: _AmbientOrb(
-            size: 470,
-            color: colors.secondary.withValues(alpha: dark ? .07 : .11),
+            // No page-specific gradient: the shared ledger canvas is the
+            // visual identity and must remain readable on every feature.
+            color: colors.bgPage.withValues(alpha: .12),
           ),
         ),
         Padding(padding: padding ?? EdgeInsets.zero, child: child),
       ],
-    );
-  }
-}
-
-class _AmbientOrb extends StatelessWidget {
-  const _AmbientOrb({required this.size, required this.color});
-  final double size;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, color.withValues(alpha: 0)],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -124,12 +92,16 @@ class PremiumPage extends StatelessWidget {
     return PremiumBackdrop(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final horizontal = constraints.maxWidth < 440 ? 12.0 : constraints.maxWidth < 760 ? 16.0 : 28.0;
+          final horizontal =
+              constraints.maxWidth < 440
+                  ? 12.0
+                  : constraints.maxWidth < 760
+                  ? 16.0
+                  : 28.0;
           return SingleChildScrollView(
-            padding: padding.resolve(Directionality.of(context)).copyWith(
-                  left: horizontal,
-                  right: horizontal,
-                ),
+            padding: padding
+                .resolve(Directionality.of(context))
+                .copyWith(left: horizontal, right: horizontal),
             child: Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxWidth),
@@ -161,9 +133,12 @@ class PageIntro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-
-    Widget intro = Row(
+    if (actions.isEmpty) return const SizedBox.shrink();
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: Wrap(spacing: 8, runSpacing: 8, children: actions),
+    );
+    /* Widget intro = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (icon != null) ...[
@@ -207,22 +182,12 @@ class PageIntro extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: colors.textPrimary,
-                      letterSpacing: -.5,
-                      height: 1.15,
-                    ),
-              ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  subtitle!,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.55,
-                      ),
+                  fontWeight: FontWeight.w900,
+                  color: colors.textPrimary,
+                  letterSpacing: -.5,
+                  height: 1.15,
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -241,7 +206,10 @@ class PageIntro extends StatelessWidget {
             children: [
               intro,
               const SizedBox(height: 14),
-              Align(alignment: AlignmentDirectional.centerStart, child: actionWrap),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: actionWrap,
+              ),
             ],
           );
         }
@@ -255,6 +223,7 @@ class PageIntro extends StatelessWidget {
         );
       },
     );
+  } */
   }
 }
 
@@ -284,25 +253,42 @@ class PremiumPanel extends StatelessWidget {
     final colors = context.colors;
     final accentColor = accent ?? colors.primary;
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final useBlur = !kIsWeb && defaultTargetPlatform != TargetPlatform.android;
 
-    final panel = Container(
-      decoration: BoxDecoration(
-        color: colors.bgElevated.withValues(alpha: dark ? .94 : .96),
-        borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: colors.border.withValues(alpha: dark ? .85 : 1)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? .18 : .045),
-            blurRadius: 20,
-            spreadRadius: -10,
-            offset: const Offset(0, 8),
+    // Frosted surfaces let the shared ledger canvas breathe through every
+    // feature page without sacrificing text contrast.
+    final panel = ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.bgElevated.withValues(alpha: dark ? .50 : .88),
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: colors.textPrimary.withValues(alpha: dark ? .12 : .10),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? .14 : .04),
+                blurRadius: 24,
+                spreadRadius: -12,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: accentColor.withValues(alpha: dark ? .045 : .025),
+                blurRadius: 28,
+                spreadRadius: -18,
+                offset: const Offset(0, 12),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Padding(padding: padding, child: child),
+          child: Padding(padding: padding, child: child),
+        ),
     );
 
-    if (onTap == null) return panel;
+    final optimizedPanel = useBlur
+        ? ClipRRect(borderRadius: BorderRadius.circular(borderRadius), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: dark ? 10 : 3, sigmaY: dark ? 10 : 3), child: panel))
+        : panel;
+    if (onTap == null) return optimizedPanel;
 
     return Semantics(
       button: true,
@@ -312,9 +298,9 @@ class PremiumPanel extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(color: accentColor.withValues(alpha: .06)),
+            border: Border.all(color: accentColor.withValues(alpha: .22)),
           ),
-          child: panel,
+          child: optimizedPanel,
         ),
       ),
     );
@@ -344,14 +330,65 @@ class MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    // بطاقات الملخص تبقى أفقية وقصيرة في جميع المقاسات؛ السجل هو الذي
+    // يستحق المساحة البصرية الأكبر في شاشات الإدارة.
+    const compact = true;
     return PremiumPanel(
       onTap: onTap,
       accent: accent,
       hoverLift: true,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(compact ? 11 : 18),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 112),
-        child: Column(
+        constraints: BoxConstraints(minHeight: compact ? 72 : 112),
+        child: compact
+            ? Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: accent.withValues(alpha: .17)),
+                    ),
+                    child: Icon(icon, color: accent, size: 17),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Text(
+                            value,
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: colors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -372,7 +409,11 @@ class MetricCard extends StatelessWidget {
                   Flexible(
                     child: Align(
                       alignment: AlignmentDirectional.centerEnd,
-                      child: StatusPill(label: badge!, color: accent, compact: true),
+                      child: StatusPill(
+                        label: badge!,
+                        color: accent,
+                        compact: true,
+                      ),
                     ),
                   )
                 else
@@ -384,7 +425,11 @@ class MetricCard extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: colors.textSecondary),
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: colors.textSecondary,
+              ),
             ),
             const SizedBox(height: 5),
             FittedBox(
@@ -403,7 +448,12 @@ class MetricCard extends StatelessWidget {
             ),
             if (caption != null) ...[
               const SizedBox(height: 5),
-              Text(caption!, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: colors.textDim)),
+              Text(
+                caption!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11.5, color: colors.textDim),
+              ),
             ],
           ],
         ),
@@ -518,10 +568,6 @@ class SectionHeader extends StatelessWidget {
             letterSpacing: -.2,
           ),
         ),
-        if (subtitle != null) ...[
-          const SizedBox(height: 3),
-          Text(subtitle!, style: TextStyle(color: colors.textDim, fontSize: 11.5)),
-        ],
       ],
     );
 
@@ -535,7 +581,10 @@ class SectionHeader extends StatelessWidget {
             children: [
               titleBlock,
               const SizedBox(height: 10),
-              Align(alignment: AlignmentDirectional.centerStart, child: trailing!),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: trailing!,
+              ),
             ],
           );
         }
@@ -569,7 +618,10 @@ class StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 4 : 6,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: .10),
         borderRadius: BorderRadius.circular(999),
@@ -653,23 +705,42 @@ class EmptyState extends StatelessWidget {
               width: 68,
               height: 68,
               decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [colors.primaryTint, colors.secondary.withValues(alpha: .12)]),
+                gradient: LinearGradient(
+                  colors: [
+                    colors.primaryTint,
+                    colors.secondary.withValues(alpha: .12),
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: colors.primary.withValues(alpha: .16)),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: .16),
+                ),
               ),
               child: Icon(icon, size: 30, color: colors.primary),
             ),
             const SizedBox(height: 16),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w900, fontSize: 16)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
             if (subtitle != null) ...[
               const SizedBox(height: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 430),
-                child: Text(subtitle!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: colors.textSecondary, height: 1.5, fontSize: 12.5)),
+                child: Text(
+                  subtitle!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    height: 1.5,
+                    fontSize: 12.5,
+                  ),
+                ),
               ),
             ],
             if (action != null) ...[const SizedBox(height: 16), action!],
@@ -721,7 +792,12 @@ class _AnimatedEntranceState extends State<AnimatedEntrance> {
 }
 
 class PulseStatusDot extends StatefulWidget {
-  const PulseStatusDot({super.key, required this.color, this.active = true, this.size = 8});
+  const PulseStatusDot({
+    super.key,
+    required this.color,
+    this.active = true,
+    this.size = 8,
+  });
   final Color color;
   final bool active;
   final double size;
@@ -730,13 +806,17 @@ class PulseStatusDot extends StatefulWidget {
   State<PulseStatusDot> createState() => _PulseStatusDotState();
 }
 
-class _PulseStatusDotState extends State<PulseStatusDot> with SingleTickerProviderStateMixin {
+class _PulseStatusDotState extends State<PulseStatusDot>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
     if (widget.active) _controller.repeat(reverse: true);
   }
 
@@ -782,7 +862,10 @@ class _PulseStatusDotState extends State<PulseStatusDot> with SingleTickerProvid
               Container(
                 width: widget.size,
                 height: widget.size,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: widget.color),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.color,
+                ),
               ),
             ],
           ),
@@ -793,7 +876,12 @@ class _PulseStatusDotState extends State<PulseStatusDot> with SingleTickerProvid
 }
 
 class MiniBars extends StatelessWidget {
-  const MiniBars({super.key, required this.values, required this.color, this.height = 56});
+  const MiniBars({
+    super.key,
+    required this.values,
+    required this.color,
+    this.height = 56,
+  });
 
   final List<double> values;
   final Color color;
@@ -801,7 +889,10 @@ class MiniBars extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxValue = values.isEmpty ? 1.0 : math.max(1.0, values.reduce((a, b) => math.max(a, b).toDouble()));
+    final maxValue =
+        values.isEmpty
+            ? 1.0
+            : math.max(1.0, values.reduce((a, b) => math.max(a, b).toDouble()));
     return SizedBox(
       height: height,
       child: Row(
@@ -815,20 +906,21 @@ class MiniBars extends StatelessWidget {
                   tween: Tween(begin: 0, end: value / maxValue),
                   duration: AppMotion.page,
                   curve: AppMotion.curve,
-                  builder: (context, t, child) => FractionallySizedBox(
-                    heightFactor: math.max(.08, t),
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [color, color.withValues(alpha: .25)],
+                  builder:
+                      (context, t, child) => FractionallySizedBox(
+                        heightFactor: math.max(.08, t),
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [color, color.withValues(alpha: .25)],
+                            ),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(5),
                       ),
-                    ),
-                  ),
                 ),
               ),
             ),

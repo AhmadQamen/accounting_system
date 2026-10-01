@@ -3,6 +3,7 @@ import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
+import 'package:accounting_system/features/master_data/models/product_unit_hierarchy.dart';
 import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -180,10 +181,23 @@ ORDER BY p.name COLLATE NOCASE
     required String name,
     String? categoryId,
     double minQuantity = 0,
+    String itemType = 'stocked',
+    String? location,
+    int costPriceMinor = 0,
     String primaryUnitName = 'Unit',
     int salePriceMinor = 0,
     String? barcode,
   }) async {
+    if (name.trim().isEmpty) throw ArgumentError('اسم المنتج مطلوب');
+    if (minQuantity < 0)
+      throw ArgumentError('الحد الأدنى للمخزون لا يمكن أن يكون سالباً');
+    if (itemType != 'stocked' && itemType != 'non_stocked') {
+      throw ArgumentError('نوع المادة غير صالح');
+    }
+    if (costPriceMinor < 0) throw ArgumentError('سعر الكلفة لا يمكن أن يكون سالباً');
+    if (primaryUnitName.trim().isEmpty) {
+      throw ArgumentError('اسم وحدة الأساس مطلوب');
+    }
     if (salePriceMinor < 0) {
       throw ArgumentError('Sale price must be non-negative');
     }
@@ -195,12 +209,37 @@ ORDER BY p.name COLLATE NOCASE
     final barcodeId =
         barcode != null && barcode.trim().isNotEmpty ? uuid.v4() : null;
     await _database.transaction((txn) async {
+      if (categoryId != null) {
+        final category = await txn.query(
+          'categories',
+          columns: ['id'],
+          where: 'id=? AND entity_id=? AND deleted_at IS NULL',
+          whereArgs: [categoryId, ctx.entityId],
+          limit: 1,
+        );
+        if (category.isEmpty) throw StateError('التصنيف المحدد غير موجود');
+      }
+      if (barcode != null && barcode.trim().isNotEmpty) {
+        final duplicate = await txn.query(
+          'barcodes',
+          columns: ['id'],
+          where: 'entity_id=? AND code=? AND deleted_at IS NULL',
+          whereArgs: [ctx.entityId, barcode.trim()],
+          limit: 1,
+        );
+        if (duplicate.isNotEmpty) {
+          throw StateError('الباركود مستخدم مسبقاً لوحدة أخرى');
+        }
+      }
       await txn.insert('products', {
         'id': productId,
         'entity_id': ctx.entityId,
         'category_id': categoryId,
         'name': name.trim(),
         'min_quantity': minQuantity,
+        'item_type': itemType,
+        'location': location?.trim().isEmpty ?? true ? null : location!.trim(),
+        'cost_price_minor': costPriceMinor,
         'created_at': now,
         'updated_at': now,
       });
@@ -216,16 +255,18 @@ ORDER BY p.name COLLATE NOCASE
         'created_at': now,
         'updated_at': now,
       });
-      await txn.insert('inventory_items', {
-        'id': inventoryItemId,
-        'entity_id': ctx.entityId,
-        'product_id': productId,
-        'warehouse_id': ctx.defaultWarehouseId,
-        'current_quantity': 0.0,
-        'inventory_value_minor': 0,
-        'updated_at': now,
-        'version': 1,
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      if (itemType == 'stocked') {
+        await txn.insert('inventory_items', {
+          'id': inventoryItemId,
+          'entity_id': ctx.entityId,
+          'product_id': productId,
+          'warehouse_id': ctx.defaultWarehouseId,
+          'current_quantity': 0.0,
+          'inventory_value_minor': 0,
+          'updated_at': now,
+          'version': 1,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
       if (barcode != null && barcode.trim().isNotEmpty) {
         await txn.insert('barcodes', {
           'id': barcodeId,
@@ -266,6 +307,62 @@ ORDER BY p.name COLLATE NOCASE
     return productId;
   }
 
+  Future<void> updateProduct({
+    required String id,
+    required String name,
+    String? categoryId,
+    required double minQuantity,
+    String itemType = 'stocked',
+    String? location,
+    int costPriceMinor = 0,
+  }) async {
+    if (name.trim().isEmpty) throw ArgumentError('اسم المنتج مطلوب');
+    if (minQuantity < 0)
+      throw ArgumentError('الحد الأدنى للمخزون لا يمكن أن يكون سالباً');
+    if (itemType != 'stocked' && itemType != 'non_stocked') {
+      throw ArgumentError('نوع المادة غير صالح');
+    }
+    if (costPriceMinor < 0) throw ArgumentError('سعر الكلفة لا يمكن أن يكون سالباً');
+    final ctx = await LocalContextService.instance.current;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _database.transaction((txn) async {
+      if (categoryId != null) {
+        final category = await txn.query(
+          'categories',
+          columns: ['id'],
+          where: 'id=? AND entity_id=? AND deleted_at IS NULL',
+          whereArgs: [categoryId, ctx.entityId],
+          limit: 1,
+        );
+        if (category.isEmpty) throw StateError('التصنيف المحدد غير موجود');
+      }
+      final updated = await txn.update(
+        'products',
+        {
+          'name': name.trim(),
+          'category_id': categoryId,
+          'min_quantity': minQuantity,
+          'item_type': itemType,
+          'location': location?.trim().isEmpty ?? true ? null : location!.trim(),
+          'cost_price_minor': costPriceMinor,
+          'updated_at': now,
+          'version': await _nextVersion(txn, 'products', id),
+        },
+        where: 'id=? AND entity_id=? AND deleted_at IS NULL',
+        whereArgs: [id, ctx.entityId],
+      );
+      if (updated != 1) throw StateError('المنتج غير موجود');
+      await _enqueueMaster(
+        txn,
+        ctx.entityId,
+        'product',
+        id,
+        'ProductUpdated',
+        now,
+      );
+    });
+  }
+
   Future<List<ProductUnit>> listProductUnits(String productId) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
@@ -275,19 +372,18 @@ ORDER BY p.name COLLATE NOCASE
       whereArgs: [ctx.entityId, productId],
       orderBy: 'is_primary DESC, name COLLATE NOCASE',
     );
-    return rows.map(ProductUnit.fromSql).toList(growable: false);
+    return ProductUnitHierarchy.ordered(rows.map(ProductUnit.fromSql));
   }
 
   Future<String> saveProductUnit({
     required String productId,
     String? id,
     required String name,
-    required double factor,
+    String? parentUnitId,
+    double unitsPerParent = 1,
     int salePriceMinor = 0,
-    bool isPrimary = false,
   }) async {
     if (name.trim().isEmpty) throw ArgumentError('Unit name is required');
-    if (factor <= 0) throw ArgumentError('Unit factor must be > 0');
     if (salePriceMinor < 0) {
       throw ArgumentError('Sale price must be non-negative');
     }
@@ -295,15 +391,99 @@ ORDER BY p.name COLLATE NOCASE
     final unitId = id ?? uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
     await _database.transaction((txn) async {
-      if (isPrimary) {
-        await txn.update(
-          'product_units',
-          {'is_primary': 0, 'updated_at': now},
-          where:
-              'entity_id=? AND product_id=? AND id<>? AND deleted_at IS NULL',
-          whereArgs: [ctx.entityId, productId, unitId],
-        );
+      final product = await txn.query(
+        'products',
+        columns: ['id'],
+        where: 'id=? AND entity_id=? AND deleted_at IS NULL',
+        whereArgs: [productId, ctx.entityId],
+        limit: 1,
+      );
+      if (product.isEmpty) {
+        throw StateError('المنتج المحدد غير موجود');
+      }
+      final unitRows = await txn.query(
+        'product_units',
+        where: 'entity_id=? AND product_id=? AND deleted_at IS NULL',
+        whereArgs: [ctx.entityId, productId],
+      );
+      final units = unitRows.map(ProductUnit.fromSql).toList(growable: false);
+      ProductUnit? current;
+      if (id != null) {
+        for (final unit in units) {
+          if (unit.id == unitId) {
+            current = unit;
+            break;
+          }
+        }
+        if (current == null) {
+          throw StateError('الوحدة المحددة غير موجودة');
+        }
+      }
+      final duplicates = await txn.query(
+        'product_units',
+        columns: ['id'],
+        where:
+            'entity_id=? AND product_id=? AND name=? AND id<>? AND deleted_at IS NULL',
+        whereArgs: [ctx.entityId, productId, name.trim(), id ?? ''],
+        limit: 1,
+      );
+      if (duplicates.isNotEmpty) {
+        throw StateError('هذه الوحدة مضافة للمنتج مسبقاً');
+      }
+
+      final isBase = current?.isPrimary ?? false;
+      late final double factor;
+      if (isBase) {
         factor = 1;
+      } else {
+        if (parentUnitId == null) {
+          throw ArgumentError(
+            'اختر الوحدة الأصغر التي تحتويها هذه العبوة',
+          );
+        }
+        if (parentUnitId == unitId) {
+          throw ArgumentError('لا يمكن أن تحتوي الوحدة نفسها');
+        }
+        ProductUnit? parent;
+        for (final unit in units) {
+          if (unit.id == parentUnitId) {
+            parent = unit;
+            break;
+          }
+        }
+        if (parent == null) {
+          throw StateError('الوحدة الأصغر المحددة غير موجودة');
+        }
+        final expectedParent =
+            current == null
+                ? (ProductUnitHierarchy.ordered(units).lastOrNull)
+                : ProductUnitHierarchy.parentOf(current, units);
+        if (expectedParent == null || expectedParent.id != parent.id) {
+          throw StateError(
+            'للحفاظ على سلسلة تحويل واضحة، أضف العبوة فوق آخر وحدة في السلسلة',
+          );
+        }
+        factor = ProductUnitHierarchy.factorToBase(
+          parent: parent,
+          unitsPerParent: unitsPerParent,
+        );
+        if (current != null) {
+          final largerUnits = ProductUnitHierarchy.ordered(
+            units.where((unit) => unit.id != unitId && unit.factor > current!.factor),
+          );
+          final nextUnit = largerUnits.firstOrNull;
+          if (nextUnit != null && factor >= nextUnit.factor) {
+            throw StateError(
+              'معامل ${current.name} يجب أن يبقى أصغر من معامل ${nextUnit.name}',
+            );
+          }
+        }
+        if (units.any(
+          (unit) =>
+              unit.id != unitId && (unit.factor - factor).abs() < 0.0000001,
+        )) {
+          throw StateError('توجد وحدة أخرى بنفس معامل التحويل');
+        }
       }
       if (id == null) {
         await txn.insert('product_units', {
@@ -312,7 +492,7 @@ ORDER BY p.name COLLATE NOCASE
           'product_id': productId,
           'name': name.trim(),
           'factor': factor,
-          'is_primary': isPrimary ? 1 : 0,
+          'is_primary': 0,
           'sale_price_minor': salePriceMinor,
           'created_at': now,
           'updated_at': now,
@@ -323,7 +503,7 @@ ORDER BY p.name COLLATE NOCASE
           {
             'name': name.trim(),
             'factor': factor,
-            'is_primary': isPrimary ? 1 : 0,
+            'is_primary': isBase ? 1 : 0,
             'sale_price_minor': salePriceMinor,
             'updated_at': now,
             'version': await _nextVersion(txn, 'product_units', unitId),
@@ -360,6 +540,149 @@ ORDER BY b.code
     return rows.map(Barcode.fromSql).toList(growable: false);
   }
 
+  Future<ProductInsights> productInsights(
+    String productId, {
+    int movementLimit = 40,
+    int documentLimit = 30,
+    Database? database,
+    LocalContext? context,
+  }) async {
+    final ctx = context ?? await LocalContextService.instance.current;
+    final db = database ?? await _database.database;
+    final unitsFuture = db.query(
+      'product_units',
+      where: 'entity_id=? AND product_id=? AND deleted_at IS NULL',
+      whereArgs: [ctx.entityId, productId],
+      orderBy: 'is_primary DESC, name COLLATE NOCASE',
+    );
+    final barcodesFuture = db.rawQuery(
+      '''SELECT b.*, u.name AS unit_name FROM barcodes b
+         JOIN product_units u ON u.id=b.product_unit_id
+         WHERE b.entity_id=? AND u.product_id=? AND b.deleted_at IS NULL AND u.deleted_at IS NULL
+         ORDER BY b.code''',
+      [ctx.entityId, productId],
+    );
+    final stockFuture = db.rawQuery(
+      '''
+SELECT i.warehouse_id, w.name warehouse_name, i.current_quantity,
+       i.inventory_value_minor, p.min_quantity
+FROM inventory_items i
+JOIN warehouses w ON w.id=i.warehouse_id
+JOIN products p ON p.id=i.product_id
+WHERE i.entity_id=? AND i.product_id=? AND w.deleted_at IS NULL
+ORDER BY w.name COLLATE NOCASE
+''',
+      [ctx.entityId, productId],
+    );
+    final movementsFuture = db.rawQuery(
+      '''
+SELECT m.movement_type, m.quantity_delta, m.reference_type, m.reference_id,
+       m.occurred_at, w.name warehouse_name
+FROM inventory_movements m
+JOIN inventory_items i ON i.id=m.inventory_item_id
+JOIN warehouses w ON w.id=i.warehouse_id
+WHERE m.entity_id=? AND i.product_id=?
+ORDER BY m.occurred_at DESC, m.created_at DESC
+LIMIT ?
+''',
+      [ctx.entityId, productId, movementLimit],
+    );
+    // Each branch is a posted/draft/void document that contains this product.
+    // The page preserves status so reversals and returns are never hidden.
+    final documentsFuture = db.rawQuery(
+      '''
+SELECT * FROM (
+  SELECT s.id, 'sale' type, s.invoice_number number, s.status, s.occurred_at
+  FROM sales s JOIN sale_items x ON x.sale_id=s.id JOIN inventory_items i ON i.id=x.inventory_item_id
+  WHERE s.entity_id=? AND i.product_id=? AND s.deleted_at IS NULL AND x.deleted_at IS NULL
+  UNION
+  SELECT p.id, 'purchase', p.invoice_number, p.status, p.occurred_at
+  FROM purchase_invoices p JOIN purchase_items x ON x.purchase_invoice_id=p.id JOIN inventory_items i ON i.id=x.inventory_item_id
+  WHERE p.entity_id=? AND i.product_id=? AND p.deleted_at IS NULL AND x.deleted_at IS NULL
+  UNION
+  SELECT r.id, 'sale_return', r.return_number, r.status, r.occurred_at
+  FROM sale_return_invoices r JOIN sale_return_items x ON x.sale_return_invoice_id=r.id JOIN inventory_items i ON i.id=x.inventory_item_id
+  WHERE r.entity_id=? AND i.product_id=? AND r.deleted_at IS NULL
+  UNION
+  SELECT r.id, 'purchase_return', r.return_number, r.status, r.occurred_at
+  FROM purchase_return_invoices r JOIN purchase_return_items x ON x.purchase_return_invoice_id=r.id JOIN inventory_items i ON i.id=x.inventory_item_id
+  WHERE r.entity_id=? AND i.product_id=? AND r.deleted_at IS NULL
+  UNION
+  SELECT w.id, 'waste', w.waste_number, w.status, w.occurred_at
+  FROM waste_invoices w JOIN waste_items x ON x.waste_invoice_id=w.id JOIN inventory_items i ON i.id=x.inventory_item_id
+  WHERE w.entity_id=? AND i.product_id=? AND w.deleted_at IS NULL
+) ORDER BY occurred_at DESC LIMIT ?
+''',
+      [
+        ctx.entityId,
+        productId,
+        ctx.entityId,
+        productId,
+        ctx.entityId,
+        productId,
+        ctx.entityId,
+        productId,
+        ctx.entityId,
+        productId,
+        documentLimit,
+      ],
+    );
+    final stocks = await stockFuture;
+    final movements = await movementsFuture;
+    final documents = await documentsFuture;
+    return ProductInsights(
+      units: ProductUnitHierarchy.ordered(
+        (await unitsFuture).map(ProductUnit.fromSql),
+      ),
+      barcodes: (await barcodesFuture)
+          .map(Barcode.fromSql)
+          .toList(growable: false),
+      stockByWarehouse: stocks
+          .map((row) {
+            final quantity = (row['current_quantity'] as num?)?.toDouble() ?? 0;
+            final value = (row['inventory_value_minor'] as num?)?.toInt() ?? 0;
+            return ProductWarehouseStock(
+              warehouseId: row['warehouse_id']?.toString() ?? '',
+              warehouseName: row['warehouse_name']?.toString() ?? '',
+              baseQuantity: quantity,
+              inventoryValueMinor: value,
+              averageCostMinor:
+                  quantity.abs() < 0.000001 ? 0 : (value / quantity).round(),
+              isLowStock:
+                  quantity <= ((row['min_quantity'] as num?)?.toDouble() ?? 0),
+            );
+          })
+          .toList(growable: false),
+      movements: movements
+          .map(
+            (row) => ProductMovementSummary(
+              type: row['movement_type']?.toString() ?? '',
+              quantityDelta: (row['quantity_delta'] as num?)?.toDouble() ?? 0,
+              referenceType: row['reference_type']?.toString() ?? '',
+              referenceId: row['reference_id']?.toString() ?? '',
+              warehouseName: row['warehouse_name']?.toString() ?? '',
+              occurredAt: DateTime.tryParse(
+                row['occurred_at']?.toString() ?? '',
+              ),
+            ),
+          )
+          .toList(growable: false),
+      documents: documents
+          .map(
+            (row) => ProductDocumentLink(
+              id: row['id']?.toString() ?? '',
+              type: row['type']?.toString() ?? '',
+              number: row['number']?.toString() ?? '',
+              status: row['status']?.toString() ?? '',
+              occurredAt: DateTime.tryParse(
+                row['occurred_at']?.toString() ?? '',
+              ),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
   Future<String> addBarcode({
     required String productUnitId,
     required String code,
@@ -369,6 +692,23 @@ ORDER BY b.code
     final id = uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
     await _database.transaction((txn) async {
+      final unit = await txn.query(
+        'product_units',
+        columns: ['id'],
+        where: 'id=? AND entity_id=? AND deleted_at IS NULL',
+        whereArgs: [productUnitId, ctx.entityId],
+        limit: 1,
+      );
+      if (unit.isEmpty) throw StateError('الوحدة المحددة غير موجودة');
+      final duplicate = await txn.query(
+        'barcodes',
+        columns: ['id'],
+        where: 'entity_id=? AND code=? AND deleted_at IS NULL',
+        whereArgs: [ctx.entityId, code.trim()],
+        limit: 1,
+      );
+      if (duplicate.isNotEmpty)
+        throw StateError('الباركود مستخدم مسبقاً لوحدة أخرى');
       await txn.insert('barcodes', {
         'id': id,
         'entity_id': ctx.entityId,
@@ -678,6 +1018,9 @@ ORDER BY b.code
         'name': row['name'],
         'minQuantity': row['min_quantity'],
         'active': row['deleted_at'] == null,
+        'itemType': (row['item_type'] as String).toUpperCase(),
+        'location': row['location'],
+        'costPriceMinor': row['cost_price_minor'] as int,
         'updatedAt': row['updated_at'],
       },
       'product_unit' => <String, Object?>{

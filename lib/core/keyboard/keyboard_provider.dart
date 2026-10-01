@@ -7,6 +7,7 @@ final keyboardManagerProvider = Provider<KeyboardManager>((ref) {
   return KeyboardManager(
     shortcuts: ref.read(shortcutNotifierProvider),
     executor: ref.read(shortcutExecutorProvider),
+    invoiceMacros: ref.read(invoiceShortcutMacroProvider),
   );
 });
 

@@ -1,5 +1,6 @@
 import 'package:accounting_system/core/shortcuts/shortcut_executor.dart';
 import 'package:accounting_system/core/shortcuts/shortcut_notifier.dart';
+import 'package:accounting_system/core/shortcuts/invoice_shortcut_macro_notifier.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'barcode_reader.dart';
@@ -13,8 +14,9 @@ import 'keyboard_handler.dart';
 class KeyboardManager {
   final ShortcutNotifier shortcuts;
   final ShortcutExecutor executor;
+  final InvoiceShortcutMacroNotifier invoiceMacros;
 
-  KeyboardManager({required this.shortcuts, required this.executor}) {
+  KeyboardManager({required this.shortcuts, required this.executor, required this.invoiceMacros}) {
     _handlers.addAll({
       KeyboardContext.dialog: DialogKeyboardHandler(),
       KeyboardContext.invoice: InvoiceKeyboardHandler(),
@@ -126,7 +128,18 @@ class KeyboardManager {
 
     // Shortcut
     if (shortcuts.loaded) {
-      final shortcut = shortcuts.findByKey(event.logicalKey);
+      final keyboard = HardwareKeyboard.instance;
+      for (final macro in invoiceMacros.macros) {
+        if (macro.key == event.logicalKey && macro.ctrl == keyboard.isControlPressed && macro.shift == keyboard.isShiftPressed && macro.alt == keyboard.isAltPressed) {
+          if (current == KeyboardContext.invoice) return invoiceMacros.dispatchIfMatches(macro) ? KeyEventResult.handled : KeyEventResult.ignored;
+        }
+      }
+      final shortcut = shortcuts.findByKey(
+        event.logicalKey,
+        ctrl: keyboard.isControlPressed,
+        shift: keyboard.isShiftPressed,
+        alt: keyboard.isAltPressed,
+      );
       if (shortcut != null) {
         executor.execute(shortcut.action);
         return KeyEventResult.handled;

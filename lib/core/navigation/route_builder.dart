@@ -1,16 +1,23 @@
 import 'package:accounting_system/features/accounting/ui/screens/accounting_home.dart';
 import 'package:accounting_system/features/auth/ui/screens/organization_members_screen.dart';
 import 'package:accounting_system/features/cash/ui/cash_screen.dart';
+import 'package:accounting_system/features/cash/ui/cashbox_details_screen.dart';
 import 'package:accounting_system/features/documents/ui/document_list_screen.dart';
 import 'package:accounting_system/features/documents/ui/new_document_screen.dart';
 import 'package:accounting_system/features/inventory/ui/inventory_action_screen.dart';
 import 'package:accounting_system/features/inventory/ui/inventory_screen.dart';
 import 'package:accounting_system/features/master_data/ui/financial_years_screen.dart';
 import 'package:accounting_system/features/master_data/ui/parties_screen.dart';
+import 'package:accounting_system/features/master_data/ui/party_details_screen.dart';
+import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:accounting_system/features/master_data/ui/products_screen.dart';
 import 'package:accounting_system/features/master_data/ui/warehouses_screen.dart';
 import 'package:accounting_system/features/reports/ui/reports_screen.dart';
+import 'package:accounting_system/features/general_ledger/ui/general_ledger_screen.dart';
+import 'package:accounting_system/features/general_ledger/ui/capital_screen.dart';
+import 'package:accounting_system/features/general_ledger/ui/closing_accounts_screen.dart';
 import 'package:accounting_system/features/settings/ui/screens/setting_screen.dart';
+import 'package:accounting_system/features/settings/ui/screens/keyboard_shortcuts_screen.dart';
 import 'package:accounting_system/features/settings/ui/screens/sync_screen.dart';
 import 'package:flutter/material.dart';
 import 'app_route.dart';
@@ -18,6 +25,7 @@ import 'app_route.dart';
 Widget buildPage(AppRoute route) {
   return switch (route.type) {
     RouteType.dashboard => const AccountingHome(),
+    RouteType.cashDesk => const CashScreen(mode: CashScreenMode.cashDesk),
     RouteType.newSale => const NewDocumentScreen(kind: DocumentKind.sale),
 
     RouteType.sales => const DocumentListScreen(kind: DocumentKind.sale),
@@ -41,16 +49,24 @@ Widget buildPage(AppRoute route) {
       mode: InventoryActionMode.transfer,
     ),
     RouteType.parties => const PartiesScreen(),
+    RouteType.partyDetails => PartyDetailsScreen(party: route.args as Party),
     RouteType.customers => const PartiesScreen(filterType: 'customer'),
     RouteType.suppliers => const PartiesScreen(filterType: 'supplier'),
     RouteType.cashboxes => const CashScreen(mode: CashScreenMode.cashboxes),
+    RouteType.cashboxDetails => CashboxDetailsScreen(
+      args: route.args as CashboxDetailsArgs,
+    ),
     RouteType.expenses => const CashScreen(mode: CashScreenMode.expenses),
     RouteType.cashTransfers => const CashScreen(mode: CashScreenMode.transfers),
     RouteType.cashSessions => const CashScreen(mode: CashScreenMode.sessions),
     RouteType.financialYears => const FinancialYearsScreen(),
     RouteType.reports => const ReportsScreen(),
+    RouteType.generalLedger => const GeneralLedgerScreen(),
+    RouteType.capital => const CapitalScreen(),
+    RouteType.closingAccounts => const ClosingAccountsScreen(),
     RouteType.sync => const SyncScreen(),
     RouteType.organizationMembers => const OrganizationMembersScreen(),
+    RouteType.keyboardShortcuts => const KeyboardShortcutsScreen(),
     RouteType.settings => const SettingsScreen(),
   };
 }

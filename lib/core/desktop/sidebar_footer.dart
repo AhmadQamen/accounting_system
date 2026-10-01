@@ -42,7 +42,7 @@ class SidebarFooter extends StatelessWidget {
     final card = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: colors.muted,
+        color: colors.muted.withValues(alpha: .48),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colors.border, width: 1),
       ),
@@ -87,16 +87,17 @@ class SidebarFooter extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 14),
-      child: onTap == null
-          ? card
-          : Semantics(
-              button: true,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onTap,
-                child: card,
+      child:
+          onTap == null
+              ? card
+              : Semantics(
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                  child: card,
+                ),
               ),
-            ),
     );
   }
 }
@@ -120,17 +121,18 @@ class _Avatar extends StatelessWidget {
         gradient: LinearGradient(colors: [colors.purple, colors.purpleLight]),
       ),
       alignment: Alignment.center,
-      child: avatarUrl != null
-          ? ClipOval(
-              child: Image.network(
-                avatarUrl!,
-                width: 38,
-                height: 38,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => _InitialText(initial),
-              ),
-            )
-          : _InitialText(initial),
+      child:
+          avatarUrl != null
+              ? ClipOval(
+                child: Image.network(
+                  avatarUrl!,
+                  width: 38,
+                  height: 38,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => _InitialText(initial),
+                ),
+              )
+              : _InitialText(initial),
     );
   }
 }
@@ -163,9 +165,17 @@ class _SubscriptionBadge extends StatelessWidget {
     final colors = context.colors;
 
     final (Color color, IconData icon, String label) = switch (status) {
-      SubscriptionStatus.premium => (colors.success, Iconsax.crown_1, 'Premium'),
+      SubscriptionStatus.premium => (
+        colors.success,
+        Iconsax.crown_1,
+        'Premium',
+      ),
       SubscriptionStatus.trial => (colors.amber, Iconsax.clock, 'Trial'),
-      SubscriptionStatus.expired => (colors.error, Iconsax.warning_2, 'Expired'),
+      SubscriptionStatus.expired => (
+        colors.error,
+        Iconsax.warning_2,
+        'Expired',
+      ),
     };
 
     return Container(

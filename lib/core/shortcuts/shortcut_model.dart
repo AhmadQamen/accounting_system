@@ -28,6 +28,7 @@ class ShortcutModel {
 
   Map<String, dynamic> toJson() => {
     'action': action.name,
+    'key_id': key.keyId,
     'key_label': keyLabel,
     'ctrl': ctrl ? 1 : 0,
     'shift': shift ? 1 : 0,
@@ -41,9 +42,12 @@ class ShortcutModel {
       (e) => e.action == action,
     );
 
+    final savedKeyId = json['key_id'] as int? ?? 0;
     return ShortcutModel(
       action: action,
-      key: defaultShortcut.key,
+      key: savedKeyId == 0
+          ? defaultShortcut.key
+          : LogicalKeyboardKey(savedKeyId),
       keyLabel: json['key_label'],
       label: defaultShortcut.label,
       description: defaultShortcut.description,

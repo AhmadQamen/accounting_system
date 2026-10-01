@@ -1,5 +1,6 @@
 import 'package:accounting_system/core/configs/uuid.dart';
 import 'package:accounting_system/core/db/app_database.dart';
+import 'package:accounting_system/core/services/general_ledger_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 class LocalContext {
@@ -50,6 +51,7 @@ class LocalContextService {
           databaseProvider ?? (() => AppDatabase.instance.database);
 
   static final instance = LocalContextService();
+  final _generalLedger = const GeneralLedgerService();
 
   final Future<Database> Function() _databaseProvider;
   LocalContext? _cached;
@@ -191,6 +193,7 @@ class LocalContextService {
         'active_entity_id': entityId,
         'updated_at': nowText,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await _generalLedger.ensureDefaultAccounts(txn, entityId);
     });
 
     _cached = null;

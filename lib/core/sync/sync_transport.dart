@@ -9,6 +9,7 @@ class DomainEvent {
     required this.aggregateVersion,
     required this.occurredAt,
     required this.payload,
+    this.schemaVersion = 1,
     this.serverSequence,
     this.receivedAt,
   });
@@ -20,6 +21,7 @@ class DomainEvent {
   final int aggregateVersion;
   final String occurredAt;
   final Map<String, dynamic> payload;
+  final int schemaVersion;
   final int? serverSequence;
   final String? receivedAt;
 
@@ -31,6 +33,7 @@ class DomainEvent {
     aggregateVersion: _requiredInt(json, 'aggregateVersion'),
     occurredAt: _requiredString(json, 'occurredAt'),
     payload: Map<String, dynamic>.from(json['payload'] as Map? ?? const {}),
+    schemaVersion: _optionalInt(json['schemaVersion']) ?? 1,
     serverSequence: _optionalInt(json['serverSequence']),
     receivedAt: json['receivedAt']?.toString(),
   );
@@ -51,6 +54,7 @@ class DomainEvent {
       aggregateVersion: (row['aggregate_version']! as num).toInt(),
       occurredAt: row['occurred_at']! as String,
       payload: Map<String, dynamic>.from(decoded),
+      schemaVersion: 2,
       serverSequence: _optionalInt(row['server_sequence']),
     );
   }
@@ -60,6 +64,7 @@ class DomainEvent {
     'aggregateType': aggregateType,
     'aggregateId': aggregateId,
     'eventType': eventType,
+    'schemaVersion': schemaVersion,
     'aggregateVersion': aggregateVersion,
     'occurredAt': occurredAt,
     'payload': payload,

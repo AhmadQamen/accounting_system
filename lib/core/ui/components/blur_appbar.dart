@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/sync_indicator.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Shared translucent app bar used by feature pages.
@@ -40,10 +41,7 @@ class BlurAppBar extends StatelessWidget implements PreferredSizeWidget {
             ? SystemUiOverlayStyle.light
             : SystemUiOverlayStyle.dark;
 
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: AppBar(
+    final appBar = AppBar(
           forceMaterialTransparency: true,
           automaticallyImplyLeading: automaticallyImplyLeading,
           leading: leading,
@@ -61,9 +59,11 @@ class BlurAppBar extends StatelessWidget implements PreferredSizeWidget {
           shape: Border(
             bottom: BorderSide(color: colors.border.withValues(alpha: .72)),
           ),
-        ),
-      ),
-    );
+        );
+    final useBlur = !kIsWeb && defaultTargetPlatform != TargetPlatform.android;
+    return useBlur
+        ? ClipRect(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12), child: appBar))
+        : appBar;
   }
 
   @override

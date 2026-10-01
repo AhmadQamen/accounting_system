@@ -28,6 +28,11 @@ class DesktopSidebar extends ConsumerWidget {
           label: 'لوحة التحكم',
           routeType: RouteType.dashboard,
         ),
+        SidebarItemModel(
+          icon: Iconsax.wallet_money,
+          label: 'الصندوق',
+          routeType: RouteType.cashDesk,
+        ),
       ],
     ),
     SidebarSectionModel(
@@ -149,6 +154,21 @@ class DesktopSidebar extends ConsumerWidget {
           routeType: RouteType.reports,
         ),
         SidebarItemModel(
+          icon: Icons.account_tree_outlined,
+          label: 'المحاسبة العامة',
+          routeType: RouteType.generalLedger,
+        ),
+        SidebarItemModel(
+          icon: Icons.groups_2_outlined,
+          label: 'رأس المال والشركاء',
+          routeType: RouteType.capital,
+        ),
+        SidebarItemModel(
+          icon: Icons.account_balance_outlined,
+          label: 'الحسابات الختامية',
+          routeType: RouteType.closingAccounts,
+        ),
+        SidebarItemModel(
           icon: Icons.calendar_month_outlined,
           label: 'السنوات المالية',
           routeType: RouteType.financialYears,
@@ -162,6 +182,11 @@ class DesktopSidebar extends ConsumerWidget {
           icon: Iconsax.profile_2user,
           label: 'أعضاء المؤسسة',
           routeType: RouteType.organizationMembers,
+        ),
+        SidebarItemModel(
+          icon: Iconsax.keyboard,
+          label: 'اختصارات الكيبورد',
+          routeType: RouteType.keyboardShortcuts,
         ),
         SidebarItemModel(
           icon: Iconsax.setting_2,
@@ -193,17 +218,14 @@ class DesktopSidebar extends ConsumerWidget {
       height: double.infinity,
       child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          filter: ImageFilter.blur(sigmaX: 7, sigmaY: 7),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.bgElevated.withValues(alpha: .70),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  colors.bgElevated.withValues(alpha: .90),
-                  colors.bgPage.withValues(alpha: .80),
-                ],
+              color: colors.bgDeep.withValues(alpha: .24),
+              border: BorderDirectional(
+                end: BorderSide(
+                  color: colors.textPrimary.withValues(alpha: .12),
+                ),
               ),
             ),
             child: Column(

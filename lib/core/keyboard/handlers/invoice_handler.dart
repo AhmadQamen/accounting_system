@@ -12,9 +12,12 @@ class InvoiceKeyboardHandler implements KeyboardHandler {
       return KeyEventResult.ignored;
     }
 
-    if (HardwareKeyboard.instance.isLogicalKeyPressed(
-      LogicalKeyboardKey.enter,
-    )) {
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        HardwareKeyboard.instance.isShiftPressed) {
+      manager.trigger(KeyboardAction.invoiceAddLine);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter) {
       manager.trigger(KeyboardAction.invoiceSubmit);
       return KeyEventResult.handled;
     }

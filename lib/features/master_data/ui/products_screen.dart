@@ -3,7 +3,8 @@ import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
-import 'package:accounting_system/features/master_data/ui/product_details_dialog.dart';
+import 'package:accounting_system/features/master_data/ui/product_details_screen.dart';
+import 'package:accounting_system/features/master_data/ui/category_manager_dialog.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,6 +45,15 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                 subtitle: 'إدارة الأصناف والوحدات والباركود من مكان واحد.',
                 icon: Iconsax.box,
                 actions: [
+                  OutlinedButton.icon(
+                    onPressed:
+                        () => showDialog<void>(
+                          context: context,
+                          builder: (_) => const CategoryManagerDialog(),
+                        ),
+                    icon: const Icon(Icons.category_outlined, size: 18),
+                    label: const Text('التصنيفات'),
+                  ),
                   FilledButton.icon(
                     onPressed: _add,
                     icon: const Icon(Icons.add_rounded, size: 18),
@@ -141,12 +151,13 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                               child: _ProductCard(
                                 product: rows[i],
                                 onTap:
-                                    () => showDialog(
-                                      context: context,
-                                      builder:
-                                          (_) => ProductDetailsDialog(
-                                            product: rows[i],
-                                          ),
+                                    () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder:
+                                            (_) => ProductDetailsScreen(
+                                              product: rows[i],
+                                            ),
+                                      ),
                                     ),
                               ),
                             ),
@@ -164,10 +175,18 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   }
 
   Future<void> _add() async {
+    final categories =
+        await ref.read(masterDataRepositoryProvider).listCategories();
+    if (!mounted) return;
     final name = TextEditingController();
     final unit = TextEditingController(text: 'قطعة');
     final salePrice = TextEditingController(text: '0');
     final barcode = TextEditingController();
+    final minQuantity = TextEditingController(text: '0');
+    final location = TextEditingController();
+    final costPrice = TextEditingController(text: '0');
+    String? categoryId;
+    var itemType = 'stocked';
     final ok = await showDialog<bool>(
       context: context,
       builder:
@@ -181,45 +200,117 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             ),
             content: SizedBox(
               width: responsiveDialogWidth(context, 440),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: name,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'اسم المنتج',
-                      prefixIcon: Icon(Iconsax.box),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: name,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'اسم المنتج',
+                        prefixIcon: Icon(Iconsax.box),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: unit,
-                    decoration: const InputDecoration(
-                      labelText: 'الوحدة الرئيسية',
-                      prefixIcon: Icon(Icons.straighten_outlined),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String?>(
+                      initialValue: categoryId,
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('بدون تصنيف'),
+                        ),
+                        ...categories.map(
+                          (category) => DropdownMenuItem<String?>(
+                            value: category.id,
+                            child: Text(category.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) => categoryId = value,
+                      decoration: const InputDecoration(
+                        labelText: 'التصنيف',
+                        prefixIcon: Icon(Icons.category_outlined),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: salePrice,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: minQuantity,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'الحد الأدنى للمخزون',
+                        prefixIcon: Icon(Icons.warning_amber_rounded),
+                      ),
                     ),
-                    decoration: const InputDecoration(
-                      labelText: 'سعر البيع',
-                      prefixIcon: Icon(Icons.sell_outlined),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: itemType,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'stocked',
+                          child: Text('مادة مخزنية'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'non_stocked',
+                          child: Text('مادة غير مخزنية / خدمة'),
+                        ),
+                      ],
+                      onChanged: (value) => itemType = value ?? 'stocked',
+                      decoration: const InputDecoration(
+                        labelText: 'نوع المادة',
+                        prefixIcon: Icon(Icons.inventory_2_outlined),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: barcode,
-                    decoration: const InputDecoration(
-                      labelText: 'الباركود (اختياري)',
-                      prefixIcon: Icon(Icons.qr_code_scanner_outlined),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: location,
+                      decoration: const InputDecoration(
+                        labelText: 'مكان التواجد (اختياري)',
+                        prefixIcon: Icon(Icons.location_on_outlined),
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: costPrice,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'سعر الكلفة',
+                        prefixIcon: Icon(Icons.price_check_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: unit,
+                      decoration: const InputDecoration(
+                        labelText: 'وحدة الأساس (أصغر وحدة)',
+                        prefixIcon: Icon(Icons.straighten_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: salePrice,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'سعر البيع',
+                        prefixIcon: Icon(Icons.sell_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: barcode,
+                      decoration: const InputDecoration(
+                        labelText: 'الباركود (اختياري)',
+                        prefixIcon: Icon(Icons.qr_code_scanner_outlined),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -235,12 +326,31 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             ],
           ),
     );
+    // showDialog completes when pop starts, while the dialog can still be
+    // rebuilding during its reverse transition. Keep its controllers alive
+    // until that transition is fully removed from the tree.
+    await Future<void>.delayed(kThemeAnimationDuration);
+    if (!mounted) {
+      name.dispose();
+      unit.dispose();
+      salePrice.dispose();
+      barcode.dispose();
+      minQuantity.dispose();
+      location.dispose();
+      costPrice.dispose();
+      return;
+    }
     if (ok == true && name.text.trim().isNotEmpty) {
       try {
         await ref
             .read(masterDataRepositoryProvider)
             .createProduct(
               name: name.text,
+              categoryId: categoryId,
+              minQuantity: double.tryParse(minQuantity.text.trim()) ?? -1,
+              itemType: itemType,
+              location: location.text,
+              costPriceMinor: Money.fromMajor(costPrice.text),
               primaryUnitName: unit.text,
               salePriceMinor: Money.fromMajor(salePrice.text),
               barcode: barcode.text,
@@ -256,6 +366,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     unit.dispose();
     salePrice.dispose();
     barcode.dispose();
+    minQuantity.dispose();
+    location.dispose();
+    costPrice.dispose();
   }
 }
 
@@ -322,12 +435,21 @@ class _ProductCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${product.categoryName ?? 'بدون تصنيف'} • ${product.primaryUnitName ?? 'وحدة'}',
+            '${product.itemType == 'stocked' ? 'مخزنية' : 'غير مخزنية'} • ${product.categoryName ?? 'بدون تصنيف'}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: colors.textSecondary, fontSize: 11),
           ),
           const SizedBox(height: 9),
+          if (product.location?.isNotEmpty == true) ...[
+            Text(
+              'المكان: ${product.location}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textDim, fontSize: 10.5),
+            ),
+            const SizedBox(height: 7),
+          ],
           Row(
             children: [
               Icon(

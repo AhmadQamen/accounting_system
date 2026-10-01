@@ -8,9 +8,11 @@ class Money {
   double get major => minor / _pow10(decimals);
 
   String format({required String locale, required String currencyCode}) {
+    final normalizedCode = currencyCode.trim().toUpperCase();
     return NumberFormat.currency(
       locale: locale,
-      name: currencyCode,
+      name: normalizedCode,
+      symbol: normalizedCode == 'SYP' ? 'ل.س' : normalizedCode,
       decimalDigits: decimals,
     ).format(major);
   }
@@ -31,7 +33,6 @@ class Money {
     return (product + scale ~/ 2) ~/ scale;
   }
 
-
   static int divideByQuantity(
     int totalMinor,
     double quantity, {
@@ -49,8 +50,12 @@ class Money {
   static int _parseUnsignedScaled(String input, int decimals) {
     final parts = input.split('.');
     final whole = int.parse(parts.first);
-    final fraction = parts.length == 2 ? parts[1].padRight(decimals, '0') : ''.padRight(decimals, '0');
-    return whole * _pow10(decimals) + (fraction.isEmpty ? 0 : int.parse(fraction));
+    final fraction =
+        parts.length == 2
+            ? parts[1].padRight(decimals, '0')
+            : ''.padRight(decimals, '0');
+    return whole * _pow10(decimals) +
+        (fraction.isEmpty ? 0 : int.parse(fraction));
   }
 
   static int fromMajor(String input, {int decimals = 2}) {
@@ -79,9 +84,8 @@ class Money {
     }
     final scale = _pow10(decimals);
     final whole = int.parse(parts.first);
-    final fractionMinor = fraction.isEmpty
-        ? 0
-        : int.parse(fraction.padRight(decimals, '0'));
+    final fractionMinor =
+        fraction.isEmpty ? 0 : int.parse(fraction.padRight(decimals, '0'));
     return sign * (whole * scale + fractionMinor);
   }
 

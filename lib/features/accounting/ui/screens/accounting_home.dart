@@ -1,14 +1,21 @@
 import 'package:accounting_system/core/domain/money.dart';
+import 'package:accounting_system/core/currency/currency.dart';
 import 'package:accounting_system/core/navigation/app_navigation.dart';
 import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
+import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/blur_appbar.dart';
+import 'package:accounting_system/core/ui/components/sync_indicator.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/features/reports/models/report_models.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:intl/intl.dart' show DateFormat;
 
 /// Cerulean Arabic ERP dashboard based on the supplied Stitch direction.
 /// Styling stays local to the home screen so the rest of the product is not
@@ -22,6 +29,7 @@ class AccountingHome extends ConsumerWidget {
     final currency =
         ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
     final compact = showCompactPageAppBar(context);
+    if (compact) return const _MobileNavigationHome();
     final repository = ref.read(reportsRepositoryProvider);
 
     return MyScaffold(
@@ -43,6 +51,629 @@ class AccountingHome extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _MobileNavigationHome extends ConsumerStatefulWidget {
+  const _MobileNavigationHome();
+
+  @override
+  ConsumerState<_MobileNavigationHome> createState() =>
+      _MobileNavigationHomeState();
+}
+
+class _MobileNavigationHomeState extends ConsumerState<_MobileNavigationHome> {
+  String? _dollarRate;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDollarRate();
+  }
+
+  Future<void> _loadDollarRate() async {
+    final dollar = await ref.read(currencyRepositoryProvider).find('USD');
+    if (!mounted) return;
+    setState(
+      () =>
+          _dollarRate =
+              dollar == null || dollar.rateMicros <= 0
+                  ? null
+                  : CurrencyMath.formatRateMicros(dollar.rateMicros),
+    );
+  }
+
+  Future<void> _editDollarRate(String currency) async {
+    if (currency.toUpperCase() == 'USD') {
+      CustomSnackBar.showWarningSnackbar(
+        'الدولار هو عملة المؤسسة الأساسية وسعره يساوي 1',
+      );
+      return;
+    }
+    var rateInput = _dollarRate ?? '';
+    final value = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('تحديد سعر الدولار'),
+            content: TextFormField(
+              initialValue: rateInput,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              onChanged: (value) => rateInput = value,
+              onFieldSubmitted: (value) => Navigator.pop(dialogContext, value),
+              decoration: InputDecoration(
+                labelText: 'سعر 1 دولار',
+                suffixText: currency,
+                hintText: 'مثال: 1500',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, rateInput),
+                child: const Text('حفظ'),
+              ),
+            ],
+          ),
+    );
+    if (value == null || !mounted) return;
+    final normalized = value.trim().replaceAll(',', '.');
+    int rateMicros;
+    try {
+      rateMicros = CurrencyMath.parseRateMicros(normalized);
+    } catch (_) {
+      CustomSnackBar.showWarningSnackbar('أدخل سعر دولار صحيحاً أكبر من صفر');
+      return;
+    }
+    final stored = CurrencyMath.formatRateMicros(rateMicros);
+    await ref
+        .read(currencyRepositoryProvider)
+        .saveCurrency(
+          code: 'USD',
+          name: 'دولار أمريكي',
+          symbol: r'$',
+          rateMicros: rateMicros,
+        );
+    if (!mounted) return;
+    setState(() => _dollarRate = stored);
+    ref.invalidate(currenciesProvider);
+    ref.read(dataRevisionProvider.notifier).state++;
+    CustomSnackBar.showSuccessSnackbar('تم حفظ سعر الدولار للمؤسسة');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(dataRevisionProvider);
+    EntityCurrency? configuredDollar;
+    for (final item
+        in ref.watch(currenciesProvider).asData?.value ??
+            const <EntityCurrency>[]) {
+      if (item.code == 'USD' && item.rateMicros > 0) {
+        configuredDollar = item;
+        break;
+      }
+    }
+    final dollarRate =
+        configuredDollar == null
+            ? _dollarRate
+            : CurrencyMath.formatRateMicros(configuredDollar.rateMicros);
+    final localContext = ref.watch(localContextProvider).asData?.value;
+    final currency = localContext?.currencyCode ?? 'IQD';
+    final entityName = localContext?.entityName.trim();
+    final repository = ref.read(reportsRepositoryProvider);
+    const items = <(String, String, IconData, RouteType)>[
+      (
+        'فاتورة بيع',
+        'بيع سريع وإدارة الفواتير',
+        Iconsax.receipt_add,
+        RouteType.newSale,
+      ),
+      ('المبيعات', 'السجل والمرتجعات', Iconsax.receipt_1, RouteType.sales),
+      (
+        'المشتريات',
+        'الفواتير والموردون',
+        Iconsax.shopping_cart,
+        RouteType.purchases,
+      ),
+      (
+        'الصندوق',
+        'الحركة النقدية والدفعات',
+        Iconsax.wallet_money,
+        RouteType.cashDesk,
+      ),
+      ('المخزون', 'الأرصدة والتسويات', Iconsax.box_1, RouteType.inventory),
+      ('المنتجات', 'المنتجات والتصنيفات', Iconsax.box, RouteType.products),
+      ('الأطراف', 'العملاء والموردون', Iconsax.people, RouteType.parties),
+      ('التقارير', 'الملخصات وكشوف الحساب', Iconsax.chart_2, RouteType.reports),
+      (
+        'رأس المال',
+        'الشركاء وإيداعات الصناديق',
+        Iconsax.wallet_money,
+        RouteType.capital,
+      ),
+      (
+        'الحسابات الختامية',
+        'المتاجرة والأرباح والميزانية',
+        Icons.account_balance_outlined,
+        RouteType.closingAccounts,
+      ),
+      ('المزامنة', 'العمليات وحالة الاتصال', Iconsax.refresh, RouteType.sync),
+      (
+        'الإعدادات',
+        'التفضيلات والاختصارات',
+        Iconsax.setting_2,
+        RouteType.settings,
+      ),
+    ];
+    return MyScaffold(
+      body: PremiumPage(
+        maxWidth: 680,
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+        child: FutureBuilder<DashboardData>(
+          future: repository.dashboardData(),
+          builder: (context, snapshot) {
+            final cash = snapshot.data?.metrics.cash ?? 0;
+            final cashText = Money(cash).format(
+              locale: Localizations.localeOf(context).toString(),
+              currencyCode: currency,
+            );
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'نظام المحاسبة',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _MobileWelcomeCard(
+                  entityName:
+                      entityName == null || entityName.isEmpty
+                          ? 'مرحباً بعودتك'
+                          : entityName,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MobileBalanceCard(
+                        title: 'رصيد الصندوق',
+                        value:
+                            snapshot.connectionState == ConnectionState.done
+                                ? cashText
+                                : 'جاري التحميل…',
+                        subtitle: 'إجمالي أرصدة الصناديق',
+                        icon: Iconsax.wallet_money,
+                        color: context.colors.primary,
+                        onTap:
+                            () => AppNavigation.open(
+                              const AppRoute(type: RouteType.cashDesk),
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _MobileBalanceCard(
+                        title: 'سعر الدولار',
+                        value:
+                            dollarRate == null
+                                ? 'اضغط للإضافة'
+                                : '$dollarRate $currency',
+                        subtitle: 'إدخال يدوي • 1 USD',
+                        icon: Icons.attach_money_rounded,
+                        color: context.colors.success,
+                        onTap: () => _editDollarRate(currency),
+                        editable: true,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                const _MobileSectionTitle('إجراءات سريعة'),
+                const SizedBox(height: 9),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MobileQuickAction(
+                        label: 'بحث منتج',
+                        icon: Iconsax.search_normal,
+                        onTap:
+                            () => AppNavigation.open(
+                              const AppRoute(type: RouteType.products),
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MobileQuickAction(
+                        label: 'بيع جديد',
+                        icon: Iconsax.receipt_add,
+                        onTap:
+                            () => AppNavigation.open(
+                              const AppRoute(type: RouteType.newSale),
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MobileQuickAction(
+                        label: 'شراء',
+                        icon: Iconsax.shopping_cart,
+                        onTap:
+                            () => AppNavigation.open(
+                              const AppRoute(type: RouteType.purchases),
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                const _MobileSectionTitle('أقسام المحاسبة'),
+                const SizedBox(height: 9),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 1.55,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    return _MobileNavigationCard(
+                      title: item.$1,
+                      subtitle: item.$2,
+                      icon: item.$3,
+                      onTap: () => AppNavigation.open(AppRoute(type: item.$4)),
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileWelcomeCard extends StatelessWidget {
+  const _MobileWelcomeCard({required this.entityName});
+
+  final String entityName;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final date = DateFormat('EEEE، d MMMM y', 'ar').format(DateTime.now());
+    return Container(
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            colors.bgElevated.withValues(alpha: .82),
+            colors.primary.withValues(alpha: .13),
+          ],
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: colors.primary.withValues(alpha: .25)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .13),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: colors.primary.withValues(alpha: .15),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.primary.withValues(alpha: .28)),
+            ),
+            child: Icon(Iconsax.building, color: colors.primary, size: 23),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'أهلاً بك',
+                  style: TextStyle(color: colors.textDim, fontSize: 11),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  entityName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  date,
+                  style: TextStyle(color: colors.textDim, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          const SyncIndicator(),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileBalanceCard extends StatelessWidget {
+  const _MobileBalanceCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    this.editable = false,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  final bool editable;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(19),
+      child: Container(
+        height: 126,
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: context.colors.bgElevated.withValues(alpha: .54),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(color: color.withValues(alpha: .24)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 31,
+                  height: 31,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: .13),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: color, size: 17),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.colors.textDim,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (editable) Icon(Icons.edit_rounded, size: 14, color: color),
+              ],
+            ),
+            const Spacer(),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: context.colors.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: context.colors.textDim, fontSize: 9),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _MobileSectionTitle extends StatelessWidget {
+  const _MobileSectionTitle(this.title);
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(
+        width: 3,
+        height: 18,
+        decoration: BoxDecoration(
+          color: context.colors.primary,
+          borderRadius: BorderRadius.circular(99),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Text(
+        title,
+        style: TextStyle(
+          color: context.colors.textPrimary,
+          fontWeight: FontWeight.w900,
+          fontSize: 14,
+        ),
+      ),
+    ],
+  );
+}
+
+class _MobileQuickAction extends StatelessWidget {
+  const _MobileQuickAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(17),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 7),
+        decoration: BoxDecoration(
+          color: context.colors.bgElevated.withValues(alpha: .50),
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: context.colors.primary.withValues(alpha: .18),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 39,
+              height: 39,
+              decoration: BoxDecoration(
+                color: context.colors.primary.withValues(alpha: .12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: context.colors.primary, size: 19),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _MobileNavigationCard extends StatelessWidget {
+  const _MobileNavigationCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(19),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: context.colors.bgElevated.withValues(alpha: .42),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(
+            color: context.colors.primary.withValues(alpha: .16),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .08),
+              blurRadius: 16,
+              offset: const Offset(0, 7),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: context.colors.primary.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, color: context.colors.primary, size: 18),
+                ),
+                const Spacer(),
+                Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  color: context.colors.textDim,
+                  size: 11,
+                ),
+              ],
+            ),
+            const SizedBox(height: 9),
+            Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 9.5, color: context.colors.textDim),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class CeruleanDashboardView extends StatelessWidget {
@@ -100,117 +731,108 @@ class CeruleanDashboardView extends StatelessWidget {
       ),
     ];
 
-    return ColoredBox(
-      color: _C.canvas,
-      child: Directionality(
-        textDirection: TextDirection.rtl,
-        child: DefaultTextStyle.merge(
-          style: TextStyle(
-            fontFamily: fontFamily,
-            fontFamilyFallback: const [
-              'IBM Plex Sans Arabic',
-              'Segoe UI',
-              'Tahoma',
-              'Arial',
-            ],
-            color: _C.text,
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final edge = constraints.maxWidth < 560 ? 16.0 : 24.0;
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(edge, 22, edge, 32),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1440),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const _Header(),
-                        const SizedBox(height: 20),
-                        LayoutBuilder(
-                          builder: (context, area) {
-                            final overview = _Overview(
-                              cash: _money(context, metrics.cash),
-                              sales: _money(context, metrics.salesToday),
-                              purchases: _money(
-                                context,
-                                metrics.purchasesToday,
-                              ),
-                              pendingSync: metrics.pendingSync,
-                              salesTrend: data.trends.sales,
-                              purchasesTrend: data.trends.purchases,
-                            );
-                            final state = _BusinessState(
-                              inventory: _money(
-                                context,
-                                metrics.inventoryValue,
-                              ),
-                              lowStock: metrics.lowStock,
-                              pendingSync: metrics.pendingSync,
-                            );
-                            if (area.maxWidth < 980) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  overview,
-                                  const SizedBox(height: 16),
-                                  state,
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: DefaultTextStyle.merge(
+        style: TextStyle(
+          fontFamily: fontFamily,
+          fontFamilyFallback: const [
+            'IBM Plex Sans Arabic',
+            'Segoe UI',
+            'Tahoma',
+            'Arial',
+          ],
+          color: _C.text,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final edge = constraints.maxWidth < 560 ? 16.0 : 24.0;
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(edge, 34, edge, 40),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1440),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const _Header(),
+                      const SizedBox(height: 20),
+                      LayoutBuilder(
+                        builder: (context, area) {
+                          final overview = _Overview(
+                            cash: _money(context, metrics.cash),
+                            sales: _money(context, metrics.salesToday),
+                            purchases: _money(context, metrics.purchasesToday),
+                            pendingSync: metrics.pendingSync,
+                            salesTrend: data.trends.sales,
+                            purchasesTrend: data.trends.purchases,
+                          );
+                          final state = _BusinessState(
+                            inventory: _money(context, metrics.inventoryValue),
+                            lowStock: metrics.lowStock,
+                            pendingSync: metrics.pendingSync,
+                          );
+                          if (area.maxWidth < 980) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Expanded(flex: 7, child: overview),
-                                const SizedBox(width: 16),
-                                Expanded(flex: 4, child: state),
+                                overview,
+                                const SizedBox(height: 16),
+                                state,
                               ],
                             );
-                          },
-                        ),
-                        const SizedBox(height: 22),
-                        const _Title(
-                          'المؤشرات الرئيسية',
-                          subtitle: 'ملخص الأرصدة والحركة المالية لليوم',
-                        ),
-                        const SizedBox(height: 12),
-                        _KpiGrid(items: kpis),
-                        const SizedBox(height: 22),
-                        LayoutBuilder(
-                          builder: (context, area) {
-                            final activity = _ActivityPanel(
-                              rows: data.recentActivity,
-                              currency: currency,
-                            );
-                            final stock = _StockPanel(rows: data.lowStockItems);
-                            if (area.maxWidth < 1020) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  activity,
-                                  const SizedBox(height: 16),
-                                  stock,
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 7, child: overview),
+                              const SizedBox(width: 16),
+                              Expanded(flex: 4, child: state),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 22),
+                      const _Title(
+                        'المؤشرات الرئيسية',
+                        subtitle: 'ملخص الأرصدة والحركة المالية لليوم',
+                      ),
+                      const SizedBox(height: 12),
+                      _KpiGrid(items: kpis),
+                      const SizedBox(height: 24),
+                      LayoutBuilder(
+                        builder: (context, area) {
+                          final activity = _ActivityPanel(
+                            rows: data.recentActivity,
+                            currency: currency,
+                          );
+                          final stock = _StockPanel(rows: data.lowStockItems);
+                          if (area.maxWidth < 1020) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Expanded(flex: 7, child: activity),
-                                const SizedBox(width: 16),
-                                Expanded(flex: 4, child: stock),
+                                activity,
+                                const SizedBox(height: 16),
+                                stock,
                               ],
                             );
-                          },
-                        ),
-                      ],
-                    ),
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 7, child: activity),
+                              const SizedBox(width: 16),
+                              Expanded(flex: 4, child: stock),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -445,72 +1067,158 @@ class _TrendSummary extends StatelessWidget {
             _Legend('المشتريات', _C.gold),
           ],
         ),
-        const SizedBox(height: 18),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: _Bars(values: sales, color: _C.primary, label: 'المبيعات'),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: _Bars(
-                values: purchases,
-                color: _C.gold,
-                label: 'المشتريات',
-              ),
-            ),
-          ],
-        ),
+        const SizedBox(height: 14),
+        _GroupedBars(sales: sales, purchases: purchases),
       ],
     );
   }
 }
 
-class _Bars extends StatelessWidget {
-  const _Bars({required this.values, required this.color, required this.label});
+class _GroupedBars extends StatelessWidget {
+  const _GroupedBars({required this.sales, required this.purchases});
 
-  final List<int> values;
-  final Color color;
-  final String label;
+  final List<int> sales;
+  final List<int> purchases;
 
   @override
   Widget build(BuildContext context) {
-    final points =
-        values.isEmpty
-            ? const <double>[0, 0, 0, 0, 0, 0, 0]
-            : values.map((value) => value.toDouble()).toList();
+    final saleValues = _sevenDays(sales);
+    final purchaseValues = _sevenDays(purchases);
+    final maxValue = [
+      ...saleValues,
+      ...purchaseValues,
+    ].fold<int>(1, (max, value) => value > max ? value : max);
+    final maxY = (maxValue * 1.25).ceilToDouble();
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 12, 10, 9),
+      height: 198,
+      padding: const EdgeInsets.fromLTRB(8, 10, 8, 2),
       decoration: BoxDecoration(
-        color: _C.surfaceLow,
-        border: Border.all(color: _C.outline),
-        borderRadius: BorderRadius.circular(6),
+        gradient: LinearGradient(
+          colors: [_C.surfaceLow, _C.surfaceLow.withValues(alpha: .62)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _C.outline.withValues(alpha: .75)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
+      child: BarChart(
+        BarChartData(
+          minY: 0,
+          maxY: maxY,
+          alignment: BarChartAlignment.spaceAround,
+          borderData: FlBorderData(show: false),
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: maxY / 4,
+            getDrawingHorizontalLine:
+                (_) => FlLine(
+                  color: _C.outline.withValues(alpha: .24),
+                  strokeWidth: 1,
+                  dashArray: const [5, 5],
+                ),
+          ),
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(),
+            rightTitles: const AxisTitles(),
+            leftTitles: const AxisTitles(),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 24,
+                getTitlesWidget: (value, meta) {
+                  final index = value.toInt();
+                  if (index < 0 || index > 6) return const SizedBox.shrink();
+                  final date = DateTime.now().subtract(
+                    Duration(days: 6 - index),
+                  );
+                  final label =
+                      index == 6 ? 'اليوم' : '${date.day}/${date.month}';
+                  return SideTitleWidget(
+                    meta: meta,
+                    child: Text(label, style: _caption),
+                  );
+                },
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          MiniBars(values: points, color: color, height: 82),
-          const SizedBox(height: 7),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('7 أيام', style: _caption),
-              Text('اليوم', style: _caption),
-            ],
+          barTouchData: BarTouchData(
+            enabled: true,
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                final label = rodIndex == 0 ? 'المبيعات' : 'المشتريات';
+                final amount =
+                    rodIndex == 0
+                        ? saleValues[groupIndex]
+                        : purchaseValues[groupIndex];
+                return BarTooltipItem(
+                  '$label\n$amount',
+                  TextStyle(
+                    color: rodIndex == 0 ? _C.primary : _C.gold,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                );
+              },
+            ),
           ),
-        ],
+          barGroups: [
+            for (var index = 0; index < 7; index++)
+              BarChartGroupData(
+                x: index,
+                barsSpace: 6,
+                barRods: [
+                  BarChartRodData(
+                    toY:
+                        saleValues[index] == 0
+                            ? maxY * .025
+                            : saleValues[index].toDouble(),
+                    width: 10,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(5),
+                    ),
+                    gradient: LinearGradient(
+                      colors: [_C.primary.withValues(alpha: .95), _C.primary],
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                    ),
+                    backDrawRodData: BackgroundBarChartRodData(
+                      show: true,
+                      toY: maxY,
+                      color: _C.primary.withValues(alpha: .075),
+                    ),
+                  ),
+                  BarChartRodData(
+                    toY:
+                        purchaseValues[index] == 0
+                            ? maxY * .025
+                            : purchaseValues[index].toDouble(),
+                    width: 10,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(5),
+                    ),
+                    gradient: LinearGradient(
+                      colors: [_C.gold.withValues(alpha: .92), _C.gold],
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                    ),
+                    backDrawRodData: BackgroundBarChartRodData(
+                      show: true,
+                      toY: maxY,
+                      color: _C.gold.withValues(alpha: .07),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
+  }
+
+  List<int> _sevenDays(List<int> values) {
+    if (values.length >= 7) return values.sublist(values.length - 7);
+    return [...List<int>.filled(7 - values.length, 0), ...values];
   }
 }
 
@@ -711,7 +1419,7 @@ class _KpiCard extends StatelessWidget {
         button: true,
         label: '${item.label}: ${item.value}',
         child: InkWell(
-          onTap: () => AppNavigation.open(AppRoute(type: item.route)),
+          onTap: () => _showKpiDialog(context, item),
           borderRadius: BorderRadius.circular(8),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 130),
@@ -763,6 +1471,92 @@ class _KpiCard extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _showKpiDialog(BuildContext context, _Kpi item) {
+  return showDialog<void>(
+    context: context,
+    builder:
+        (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      _IconBox(item.icon, color: item.color, size: 46),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          item.label,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: item.color.withValues(alpha: .10),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: item.color.withValues(alpha: .25),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.caption,
+                          style: const TextStyle(color: _C.muted),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          item.value,
+                          style: TextStyle(
+                            color: item.color,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'هذه قراءة مختصرة من السجل المحلي المعتمد. لا تحتاج لمغادرة لوحة التحكم لمراجعة الرقم.',
+                    style: TextStyle(color: _C.muted, height: 1.5),
+                  ),
+                  const SizedBox(height: 18),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('تم'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+  );
 }
 
 class _ActivityPanel extends StatelessWidget {
@@ -1502,19 +2296,21 @@ ButtonStyle _secondaryButton(BuildContext context) => OutlinedButton.styleFrom(
 );
 
 abstract final class _C {
-  static const canvas = Color(0xFF041132);
-  static const lowest = Color(0xFF000B2D);
-  static const surfaceLow = Color(0xFF0D1A3B);
-  static const surface = Color(0xFF111E3F);
-  static const surfaceHigh = Color(0xFF1C294A);
-  static const outline = Color(0xFF3E484C);
-  static const text = Color(0xFFDBE1FF);
-  static const muted = Color(0xFFBEC8CC);
-  static const dim = Color(0xFF889296);
-  static const primary = Color(0xFF7BD3ED);
-  static const primaryContainer = Color(0xFF007991);
-  static const onPrimary = Color(0xFFE0F6FF);
-  static const positive = Color(0xFF81D6C0);
-  static const gold = Color(0xFFD7C775);
-  static const error = Color(0xFFFFB4AB);
+  // Matches the global CustomScaffold palette so the dashboard is no longer
+  // a separate blue theme from the rest of the application.
+  static const canvas = Color(0x260B1C2C);
+  static const lowest = Color(0x85122B42);
+  static const surfaceLow = Color(0x80122B42);
+  static const surface = Color(0x8A193852);
+  static const surfaceHigh = Color(0x961F405B);
+  static const outline = Color(0x2EF6F4F0);
+  static const text = Color(0xFFF6F4F0);
+  static const muted = Color(0xBFF6F4F0);
+  static const dim = Color(0x80F6F4F0);
+  static const primary = Color(0xFF3D8D95);
+  static const primaryContainer = Color(0xFF244F67);
+  static const onPrimary = Color(0xFFF6F4F0);
+  static const positive = Color(0xFF65BFAE);
+  static const gold = Color(0xFFE6C875);
+  static const error = Color(0xFFFF7A7A);
 }

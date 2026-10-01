@@ -1,4 +1,6 @@
 import 'package:accounting_system/core/domain/money.dart';
+import 'package:accounting_system/core/domain/party_balance.dart';
+import 'package:accounting_system/core/currency/currency.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
@@ -77,7 +79,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                   children: [
                                     const Text('الرصيد الحالي'),
                                     Text(
-                                      Money(balance).format(
+                                      Money(balance.partyDisplayAmountMinor).format(
                                         locale:
                                             Localizations.localeOf(
                                               context,
@@ -91,11 +93,7 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                       ),
                                     ),
                                     Text(
-                                      balance > 0
-                                          ? 'الطرف مدين لنا'
-                                          : balance < 0
-                                          ? 'نحن مدينون للطرف'
-                                          : 'الرصيد متعادل',
+                                      balance.partyBalanceLabel,
                                     ),
                                   ],
                                 ),
@@ -111,6 +109,13 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                       onPressed: () => _payment(receive: false),
                                       icon: const Icon(Icons.north_east),
                                       label: const Text('دفع للطرف'),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: _showStatement,
+                                      icon: const Icon(
+                                        Icons.receipt_long_outlined,
+                                      ),
+                                      label: const Text('كشف الحساب والفواتير'),
                                     ),
                                   ],
                                 ),
@@ -138,8 +143,10 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                     itemBuilder: (context, index) {
                                       final row = ledger[index];
                                       final delta = row.balanceDeltaMinor;
-                                      final amountText =
-                                          '${delta >= 0 ? '+' : ''}${Money(delta).format(locale: Localizations.localeOf(context).toString(), currencyCode: currency)}';
+                                      final amountText = Money(delta.abs()).format(
+                                        locale: Localizations.localeOf(context).toString(),
+                                        currencyCode: currency,
+                                      );
                                       return Padding(
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 8,
@@ -152,7 +159,9 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                                   CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  row.entryType,
+                                                  partyLedgerEntryLabel(
+                                                    row.entryType,
+                                                  ),
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,
@@ -180,9 +189,11 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
                                                 color:
-                                                    delta >= 0
+                                                    delta > 0
                                                         ? context.colors.success
-                                                        : context.colors.error,
+                                                        : delta < 0
+                                                        ? context.colors.warning
+                                                        : context.colors.textSecondary,
                                                 fontWeight: FontWeight.w800,
                                               ),
                                             );
@@ -224,14 +235,99 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
   Future<PartyAccountSnapshot> _summary(String partyId) =>
       ref.read(cashRepositoryProvider).partyAccountSummary(partyId);
 
+  Future<void> _showStatement() async {
+    final cash = ref.read(cashRepositoryProvider);
+    final statement = await cash.partyStatement(widget.party.id!);
+    final documents = await cash.partyOpenDocuments(widget.party.id!);
+    if (!mounted) return;
+    final currency =
+        ref.read(localContextProvider).asData?.value.currencyCode ?? 'IQD';
+    await showDialog<void>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('كشف الحساب والفواتير غير المسددة'),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 760),
+              height: responsiveDialogHeight(context, 560),
+              child: ListView(
+                children: [
+                  ListTile(
+                    title: const Text('رصيد البداية'),
+                    trailing: Text(
+                      Money(statement.openingMinor).format(
+                        locale: Localizations.localeOf(context).toString(),
+                        currencyCode: currency,
+                      ),
+                    ),
+                  ),
+                  ...statement.entries.map(
+                    (row) => ListTile(
+                      title: Text(partyLedgerEntryLabel(row.entryType)),
+                      subtitle: Text(
+                        '${row.referenceType ?? ''} • ${row.referenceId ?? ''} • ${row.occurredAt?.toLocal() ?? ''}',
+                      ),
+                      trailing: Text(
+                        Money(row.balanceDeltaMinor.abs()).format(
+                          locale: Localizations.localeOf(context).toString(),
+                          currencyCode: currency,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    title: const Text('رصيد النهاية'),
+                    trailing: Text(
+                      Money(statement.closingMinor.partyDisplayAmountMinor).format(
+                        locale: Localizations.localeOf(context).toString(),
+                        currencyCode: currency,
+                      ),
+                    ),
+                  ),
+                  const Divider(),
+                  const Text(
+                    'المتبقي المسجل داخل المستند',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const Text(
+                    'لا يشمل الدفعات اللاحقة غير المخصصة لفاتورة محددة.',
+                  ),
+                  ...documents.map(
+                    (doc) => ListTile(
+                      title: Text('${doc.type} • ${doc.number}'),
+                      subtitle: Text(doc.status),
+                      trailing: Text(
+                        Money(doc.recordedRemainingMinor).format(
+                          locale: Localizations.localeOf(context).toString(),
+                          currencyCode: currency,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('إغلاق'),
+              ),
+            ],
+          ),
+    );
+  }
+
   Future<void> _payment({required bool receive}) async {
     final cashboxes = await ref.read(cashRepositoryProvider).listCashboxes();
+    final currencies =
+        await ref.read(currencyRepositoryProvider).listCurrencies();
     if (!mounted) return;
     if (cashboxes.isEmpty) {
       CustomSnackBar.showWarningSnackbar('أضف صندوقاً أولاً');
       return;
     }
     var cashboxId = cashboxes.first.id!;
+    var selectedCurrency = currencies.first;
     final amount = TextEditingController();
     final note = TextEditingController();
     final ok = await showDialog<bool>(
@@ -266,13 +362,81 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
                           ),
                         ),
                         const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: selectedCurrency.code,
+                          items: currencies
+                              .where((item) => item.rateMicros > 0)
+                              .map(
+                                (item) => DropdownMenuItem(
+                                  value: item.code,
+                                  child: Text(
+                                    item.isBase
+                                        ? '${item.code} • الأساسية'
+                                        : '${item.code} • 1 = ${CurrencyMath.formatRateMicros(item.rateMicros)}',
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setLocal(
+                              () =>
+                                  selectedCurrency = currencies.firstWhere(
+                                    (item) => item.code == value,
+                                  ),
+                            );
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'عملة الدفعة',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         TextField(
                           controller: amount,
                           keyboardType: TextInputType.number,
+                          onChanged: (_) => setLocal(() {}),
                           decoration: const InputDecoration(
                             labelText: 'المبلغ',
                           ),
                         ),
+                        if (!selectedCurrency.isBase &&
+                            amount.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Builder(
+                            builder: (context) {
+                              try {
+                                final foreign = Money.fromMajor(
+                                  amount.text,
+                                  decimals: selectedCurrency.decimalDigits,
+                                );
+                                final base = CurrencyMath.toBaseMinor(
+                                  foreign,
+                                  selectedCurrency.rateMicros,
+                                );
+                                final baseCode =
+                                    ref
+                                        .read(localContextProvider)
+                                        .asData
+                                        ?.value
+                                        .currencyCode ??
+                                    '';
+                                return Align(
+                                  alignment: AlignmentDirectional.centerStart,
+                                  child: Text(
+                                    'المقابل: ${Money(base).format(locale: Localizations.localeOf(context).toString(), currencyCode: baseCode)}',
+                                    style: TextStyle(
+                                      color: context.colors.primary,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                );
+                              } catch (_) {
+                                return const SizedBox.shrink();
+                              }
+                            },
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         TextField(
                           controller: note,
@@ -298,14 +462,25 @@ class _PartyDetailsDialogState extends ConsumerState<PartyDetailsDialog> {
     );
     if (ok == true) {
       try {
+        final foreignAmount = Money.fromMajor(
+          amount.text,
+          decimals: selectedCurrency.decimalDigits,
+        );
+        final baseAmount = CurrencyMath.toBaseMinor(
+          foreignAmount,
+          selectedCurrency.rateMicros,
+        );
         await ref
             .read(cashRepositoryProvider)
             .partyPayment(
               partyId: widget.party.id!,
               cashboxId: cashboxId,
-              amountMinor: Money.fromMajor(amount.text),
+              amountMinor: baseAmount,
               receiveFromParty: receive,
               note: note.text,
+              currencyCode: selectedCurrency.code,
+              exchangeRateMicros: selectedCurrency.rateMicros,
+              foreignAmountMinor: foreignAmount,
             );
         ref.read(dataRevisionProvider.notifier).state++;
         setState(() => revision++);

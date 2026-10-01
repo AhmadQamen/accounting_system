@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/desktop/desktop_shell.dart';
+import 'package:accounting_system/core/keyboard/global_keyboard_listener.dart';
 import 'package:accounting_system/core/theme/app_theme.dart';
 import 'package:accounting_system/core/ui/components/scroll_behavior.dart';
 import 'package:accounting_system/error_page.dart';
@@ -36,7 +37,9 @@ class AccountingSystem extends ConsumerWidget {
           ),
       data: (_) {
         if (auth.isInitializing) return const ModernSplashScreen();
-        if (auth.isAuthenticated) return const AppShell();
+        if (auth.isAuthenticated) {
+          return const GlobalKeyboardListener(child: AppShell());
+        }
         if (auth.status == AuthStatus.choosingMembership ||
             auth.status == AuthStatus.registeringDevice ||
             auth.status == AuthStatus.deviceRevoked ||
@@ -65,6 +68,13 @@ class AccountingSystem extends ConsumerWidget {
     theme: AppTheme.light,
     darkTheme: AppTheme.dark,
     scrollBehavior: NoScrollGlowBehavior(),
+    builder:
+        (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(settings.fontScale)),
+          child: child ?? const SizedBox.shrink(),
+        ),
     home: home,
   );
 }

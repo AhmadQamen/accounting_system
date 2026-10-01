@@ -1,5 +1,6 @@
 import 'package:accounting_system/accounting_system.dart';
 import 'package:accounting_system/core/navigation/app_navigation.dart';
+import 'package:accounting_system/core/shortcuts/shortcut_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,7 @@ class _GlobalKeyboardListenerState
     extends ConsumerState<GlobalKeyboardListener> {
   late final HardwareKeyboard _keyboard;
   late final dynamic _manager;
+  bool _escapeScheduled = false;
 
   @override
   void initState() {
@@ -27,13 +29,25 @@ class _GlobalKeyboardListenerState
 
     _keyboard = HardwareKeyboard.instance;
     _manager = ref.read(keyboardManagerProvider);
+    ref.read(invoiceShortcutMacroProvider).load();
     _manager.on(KeyboardAction.escape, () {
-      final navigator = AccountingSystem.navigatorKey.currentState;
-      if (navigator != null && navigator.canPop()) {
-        navigator.pop();
-      } else {
-        AppNavigation.back();
-      }
+      if (_escapeScheduled) return;
+      _escapeScheduled = true;
+      // Never remove a route while Flutter is still dispatching the hardware
+      // key event. Dialog focus/InheritedWidget dependants are finalized at
+      // the end of the frame; popping synchronously can trip
+      // `_dependents.isEmpty` and can also pop twice on a repeated Esc event.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _escapeScheduled = false;
+        if (!mounted) return;
+        final navigator = AccountingSystem.navigatorKey.currentState;
+        if (navigator != null && navigator.canPop()) {
+          navigator.maybePop();
+        } else {
+          AppNavigation.back();
+        }
+      });
+      WidgetsBinding.instance.ensureVisualUpdate();
     });
     _keyboard.addHandler(_handleHardwareKey);
   }

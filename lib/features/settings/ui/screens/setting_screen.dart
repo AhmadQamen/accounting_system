@@ -1,5 +1,6 @@
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/db/local_context.dart';
+import 'package:accounting_system/core/currency/currency.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/providers/sync_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
@@ -105,6 +106,35 @@ class SettingsScreen extends ConsumerWidget {
                                 ref
                                     .read(settingsControllerProvider.notifier)
                                     .changeTheme(v);
+                            },
+                          ),
+                        ),
+                        Divider(height: 1, color: context.colors.border),
+                        _SettingRow(
+                          icon: Icons.text_fields_rounded,
+                          title: 'حجم الخط',
+                          subtitle: 'يُطبّق على جميع واجهات التطبيق',
+                          trailing: DropdownButton<double>(
+                            value: settings.fontScale,
+                            underline: const SizedBox.shrink(),
+                            items: const [
+                              DropdownMenuItem(value: .85, child: Text('صغير')),
+                              DropdownMenuItem(value: 1, child: Text('عادي')),
+                              DropdownMenuItem(
+                                value: 1.15,
+                                child: Text('كبير'),
+                              ),
+                              DropdownMenuItem(
+                                value: 1.30,
+                                child: Text('كبير جداً'),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .changeFontScale(value);
+                              }
                             },
                           ),
                         ),
@@ -395,6 +425,11 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
             const SizedBox(height: 14),
+            const AnimatedEntrance(
+              delay: Duration(milliseconds: 125),
+              child: _CurrencySettingsCard(),
+            ),
+            const SizedBox(height: 14),
             AnimatedEntrance(
               delay: const Duration(milliseconds: 135),
               child: PremiumPanel(
@@ -570,6 +605,311 @@ class SettingsScreen extends ConsumerWidget {
         );
       }
     }
+  }
+}
+
+class _CurrencySettingsCard extends ConsumerWidget {
+  const _CurrencySettingsCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currencies = ref.watch(currenciesProvider);
+    final baseCode =
+        ref.watch(localContextProvider).asData?.value.currencyCode ?? '';
+    return PremiumPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SectionHeader(
+            title: 'العملات وأسعار الصرف',
+            subtitle:
+                'المبالغ المحاسبية تثبت بعملة المؤسسة $baseCode، ويُحفظ سعر العملية لحظة الفاتورة.',
+            trailing: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _changeBaseCurrency(context, ref),
+                  icon: const Icon(
+                    Icons.account_balance_wallet_outlined,
+                    size: 18,
+                  ),
+                  label: const Text('عملة الأساس'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _editCurrency(context, ref),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('إضافة عملة'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          currencies.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error:
+                (error, _) => EmptyState(
+                  icon: Icons.warning_amber_rounded,
+                  title: 'تعذر قراءة العملات',
+                  subtitle: '$error',
+                ),
+            data:
+                (items) => Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final currency in items)
+                      _CurrencyTile(
+                        currency: currency,
+                        baseCode: baseCode,
+                        onTap:
+                            currency.isBase
+                                ? null
+                                : () => _editCurrency(
+                                  context,
+                                  ref,
+                                  currency: currency,
+                                ),
+                      ),
+                  ],
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _changeBaseCurrency(BuildContext context, WidgetRef ref) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('تعيين الليرة السورية كعملة أساس'),
+            content: const Text(
+              'سيصبح أساس الفواتير والأرصدة الجديدة SYP (ل.س). لا يُسمح بذلك إذا كانت المؤسسة تحتوي فواتير أو قيوداً أو أحداث مزامنة، لأن تغيير رمز العملة لا يحوّل الأرصدة القديمة. كما يجب أن يطابق الباك currencyCode = SYP قبل المزامنة.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('تعيين ل.س'),
+              ),
+            ],
+          ),
+    );
+    if (accepted != true) return;
+    try {
+      await ref
+          .read(currencyRepositoryProvider)
+          .changeBaseCurrency(
+            code: CurrencyDefaults.baseCode,
+            name: CurrencyDefaults.baseName,
+            symbol: CurrencyDefaults.baseSymbol,
+          );
+      LocalContextService.instance.clearCache();
+      ref.invalidate(localContextProvider);
+      ref.invalidate(currenciesProvider);
+      ref.read(dataRevisionProvider.notifier).state++;
+      CustomSnackBar.showSuccessSnackbar(
+        'تم تعيين الليرة السورية (ل.س) كعملة أساس محلية',
+      );
+    } catch (error) {
+      CustomSnackBar.showErrorSnackbar('$error');
+    }
+  }
+
+  Future<void> _editCurrency(
+    BuildContext context,
+    WidgetRef ref, {
+    EntityCurrency? currency,
+  }) async {
+    final code = TextEditingController(text: currency?.code ?? 'USD');
+    final name = TextEditingController(text: currency?.name ?? 'دولار أمريكي');
+    final symbol = TextEditingController(text: currency?.symbol ?? r'$');
+    final rate = TextEditingController(
+      text:
+          currency == null
+              ? ''
+              : CurrencyMath.formatRateMicros(currency.rateMicros),
+    );
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(currency == null ? 'إضافة عملة' : 'تحديث سعر العملة'),
+            content: SizedBox(
+              width: 430,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: code,
+                          readOnly: currency != null,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'الرمز ISO مثل USD',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: symbol,
+                          decoration: const InputDecoration(
+                            labelText: 'رمز العرض',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'اسم العملة'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: rate,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText:
+                          'قيمة 1 ${code.text.trim().isEmpty ? 'عملة' : code.text.toUpperCase()}',
+                      suffixText:
+                          ref
+                              .read(localContextProvider)
+                              .asData
+                              ?.value
+                              .currencyCode,
+                      helperText:
+                          'يُحفظ هذا السعر بتاريخ اليوم ولا يغيّر الفواتير القديمة.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('حفظ السعر'),
+              ),
+            ],
+          ),
+    );
+    if (accepted != true) {
+      code.dispose();
+      name.dispose();
+      symbol.dispose();
+      rate.dispose();
+      return;
+    }
+    try {
+      await ref
+          .read(currencyRepositoryProvider)
+          .saveCurrency(
+            code: code.text,
+            name: name.text,
+            symbol: symbol.text,
+            rateMicros: CurrencyMath.parseRateMicros(rate.text),
+          );
+      ref.invalidate(currenciesProvider);
+      ref.read(dataRevisionProvider.notifier).state++;
+      CustomSnackBar.showSuccessSnackbar('تم حفظ العملة وسعر الصرف');
+    } catch (error) {
+      CustomSnackBar.showErrorSnackbar('$error');
+    } finally {
+      code.dispose();
+      name.dispose();
+      symbol.dispose();
+      rate.dispose();
+    }
+  }
+}
+
+class _CurrencyTile extends StatelessWidget {
+  const _CurrencyTile({
+    required this.currency,
+    required this.baseCode,
+    required this.onTap,
+  });
+
+  final EntityCurrency currency;
+  final String baseCode;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: colors.bgPage.withValues(alpha: .62),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 250,
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  currency.symbol,
+                  style: TextStyle(
+                    color: colors.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${currency.name} • ${currency.code}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      currency.isBase
+                          ? 'عملة الدفاتر الأساسية'
+                          : '1 ${currency.code} = ${CurrencyMath.formatRateMicros(currency.rateMicros)} $baseCode',
+                      style: TextStyle(color: colors.textDim, fontSize: 10.5),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                Icon(Icons.edit_outlined, size: 17, color: colors.textDim),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

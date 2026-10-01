@@ -3,6 +3,8 @@ import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
+import 'package:accounting_system/features/master_data/models/product_unit_hierarchy.dart';
+import 'package:accounting_system/features/master_data/ui/category_manager_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,6 +40,11 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'تعديل بيانات المنتج',
+                    onPressed: _editProduct,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
                   ),
@@ -57,24 +64,31 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                     final data = snapshot.data!;
                     final units = data.units;
                     final barcodes = data.barcodes;
-                    final specs = data.specifications;
                     return ListView(
                       children: [
                         _sectionHeader('الوحدات', () => _addUnit(productId)),
-                        ...units.map(
-                          (u) => ListTile(
+                        ...units.map((u) {
+                          final parent = ProductUnitHierarchy.parentOf(
+                            u,
+                            units,
+                          );
+                          final relation =
+                              parent == null
+                                  ? 'وحدة الأساس للمخزون'
+                                  : '1 ${u.name} = ${_numberInput(ProductUnitHierarchy.unitsPerParent(u, units))} ${parent.name} = ${_numberInput(u.factor)} ${ProductUnitHierarchy.baseUnit(units)?.name ?? 'وحة أساس'}';
+                          return ListTile(
                             leading: Icon(
                               u.isPrimary ? Icons.star : Icons.straighten,
                             ),
                             title: Text(u.name),
                             subtitle: Text(
-                              'عامل التحويل: ${u.factor} • سعر البيع: ${_moneyInput(u.salePriceMinor)}',
+                              '$relation • سعر البيع: ${_moneyInput(u.salePriceMinor)}',
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (u.isPrimary)
-                                  const Chip(label: Text('رئيسية')),
+                                  const Chip(label: Text('وحدة الأساس')),
                                 IconButton(
                                   tooltip: 'تعديل الوحدة والسعر',
                                   onPressed: () => _editUnit(u),
@@ -82,8 +96,8 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                                 ),
                               ],
                             ),
-                          ),
-                        ),
+                          );
+                        }),
                         const Divider(),
                         _sectionHeader(
                           'الباركود',
@@ -96,27 +110,6 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                             leading: const Icon(Icons.qr_code),
                             title: Text(b.code),
                             subtitle: Text(b.unitName ?? ''),
-                          ),
-                        ),
-                        const Divider(),
-                        _sectionHeader(
-                          'المواصفات',
-                          () => _addSpecification(productId),
-                        ),
-                        if (specs.isEmpty)
-                          const ListTile(title: Text('لا توجد مواصفات')),
-                        ...specs.map(
-                          (s) => ListTile(
-                            title: Text(
-                              s.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              s.value,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
                           ),
                         ),
                       ],
@@ -154,32 +147,185 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     final repo = ref.read(masterDataRepositoryProvider);
     final unitsFuture = repo.listProductUnits(productId);
     final barcodesFuture = repo.listBarcodes(productId);
-    final specificationsFuture = repo.listProductSpecifications(productId);
     return ProductDetailsData(
-      units: await unitsFuture,
+      units: ProductUnitHierarchy.ordered(await unitsFuture),
       barcodes: await barcodesFuture,
-      specifications: await specificationsFuture,
+      specifications: const [],
     );
   }
 
-  Future<void> _addUnit(String productId) =>
-      _showUnitEditor(productId: productId);
+  Future<void> _editProduct() async {
+    final categories =
+        await ref.read(masterDataRepositoryProvider).listCategories();
+    if (!mounted) return;
+    final name = TextEditingController(text: widget.product.name);
+    final min = TextEditingController(
+      text: _numberInput(widget.product.minQuantity),
+    );
+    var categoryId =
+        categories.any(
+              (category) => category.id == widget.product.categoryId,
+            )
+            ? widget.product.categoryId
+            : null;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder:
+                (dialogContext, setLocal) => AlertDialog(
+                  title: const Text('تعديل المنتج'),
+                  content: SizedBox(
+                    width: responsiveDialogWidth(context, 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: name,
+                          decoration: const InputDecoration(
+                            labelText: 'اسم المنتج',
+                          ),
+                        ),
+                        const SizedBox(height: 9),
+                        DropdownButtonFormField<String?>(
+                          initialValue: categoryId,
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('بدون تصنيف'),
+                            ),
+                            ...categories.map(
+                              (category) => DropdownMenuItem<String?>(
+                                value: category.id,
+                                child: Text(category.name),
+                              ),
+                            ),
+                          ],
+                          onChanged:
+                              (value) => setLocal(() => categoryId = value),
+                          decoration: const InputDecoration(
+                            labelText: 'التصنيف',
+                          ),
+                        ),
+                        const SizedBox(height: 9),
+                        TextField(
+                          controller: min,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'الحد الأدنى للمخزون',
+                          ),
+                        ),
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: TextButton.icon(
+                            onPressed:
+                                () => showDialog<void>(
+                                  context: dialogContext,
+                                  builder: (_) => const CategoryManagerDialog(),
+                                ),
+                            icon: const Icon(Icons.add_rounded, size: 16),
+                            label: const Text('إدارة التصنيفات'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('حفظ التعديل'),
+                    ),
+                  ],
+                ),
+          ),
+    );
+    if (ok == true) {
+      try {
+        await ref
+            .read(masterDataRepositoryProvider)
+            .updateProduct(
+              id: widget.product.id!,
+              name: name.text,
+              categoryId: categoryId,
+              minQuantity: double.tryParse(min.text.trim()) ?? -1,
+            );
+        ref.read(dataRevisionProvider.notifier).state++;
+        setState(() => revision++);
+      } catch (error) {
+        if (mounted) CustomSnackBar.showErrorSnackbar('$error');
+      }
+    }
+    name.dispose();
+    min.dispose();
+  }
 
-  Future<void> _editUnit(ProductUnit unit) =>
-      _showUnitEditor(productId: unit.productId, existing: unit);
+  Future<void> _addUnit(String productId) async {
+    final units = await ref
+        .read(masterDataRepositoryProvider)
+        .listProductUnits(productId);
+    if (!mounted) return;
+    await _showUnitEditor(productId: productId, units: units);
+  }
+
+  Future<void> _editUnit(ProductUnit unit) async {
+    final units = await ref
+        .read(masterDataRepositoryProvider)
+        .listProductUnits(unit.productId);
+    if (!mounted) return;
+    await _showUnitEditor(
+      productId: unit.productId,
+      units: units,
+      existing: unit,
+    );
+  }
 
   Future<void> _showUnitEditor({
     required String productId,
+    required List<ProductUnit> units,
     ProductUnit? existing,
   }) async {
+    final orderedUnits = ProductUnitHierarchy.ordered(units);
+    final isBase = existing?.isPrimary ?? false;
+    final inferredParent =
+        existing == null
+            ? ProductUnitHierarchy.baseUnit(orderedUnits)
+            : ProductUnitHierarchy.parentOf(existing, orderedUnits);
+    final rawParentCandidates = <ProductUnit>[
+      if (existing == null && orderedUnits.isNotEmpty)
+        orderedUnits.last
+      else if (inferredParent != null)
+        inferredParent,
+    ];
+    final parentCandidates = <ProductUnit>[
+      ...{
+        for (final unit in rawParentCandidates)
+          if (unit.id != null) unit.id!: unit,
+      }.values,
+    ];
+    String? parentUnitId =
+        parentCandidates
+                .where((unit) => unit.id == inferredParent?.id)
+                .firstOrNull
+                ?.id ??
+            parentCandidates.firstOrNull?.id;
     final name = TextEditingController(text: existing?.name ?? '');
-    final factor = TextEditingController(
-      text: existing == null ? '1' : _numberInput(existing.factor),
+    final unitsPerParent = TextEditingController(
+      text:
+          existing == null
+              ? '2'
+              : _numberInput(
+                ProductUnitHierarchy.unitsPerParent(existing, orderedUnits),
+              ),
     );
     final salePrice = TextEditingController(
       text: _moneyInput(existing?.salePriceMinor ?? 0),
     );
-    var primary = existing?.isPrimary ?? false;
     final ok = await showDialog<bool>(
       context: context,
       builder:
@@ -194,18 +340,76 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                       children: [
                         TextField(
                           controller: name,
+                          onChanged: (_) => setLocal(() {}),
                           decoration: const InputDecoration(
                             labelText: 'اسم الوحدة',
                           ),
                         ),
                         const SizedBox(height: 8),
-                        TextField(
-                          controller: factor,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'عامل التحويل للوحدة الرئيسية',
+                        if (!isBase) ...[
+                          DropdownButtonFormField<String>(
+                            key: ValueKey('unit-parent-$parentUnitId'),
+                            initialValue:
+                                parentCandidates.any(
+                                      (unit) => unit.id == parentUnitId,
+                                    )
+                                    ? parentUnitId
+                                    : null,
+                            items:
+                                parentCandidates
+                                    .map(
+                                      (unit) => DropdownMenuItem(
+                                        value: unit.id,
+                                        child: Text(unit.name),
+                                      ),
+                                    )
+                                    .toList(),
+                            onChanged:
+                                (value) => setLocal(
+                                  () => parentUnitId = value,
+                                ),
+                            decoration: const InputDecoration(
+                              labelText: 'الوحدة الأصغر داخلها',
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: unitsPerParent,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            onChanged: (_) => setLocal(() {}),
+                            decoration: InputDecoration(
+                              labelText:
+                                  'عدد ${parentCandidates.where((unit) => unit.id == parentUnitId).firstOrNull?.name ?? 'الوحدات'} داخل ${name.text.trim().isEmpty ? 'العبوة' : name.text.trim()}',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _UnitConversionPreview(
+                            unitName:
+                                name.text.trim().isEmpty
+                                    ? 'العبوة الجديدة'
+                                    : name.text.trim(),
+                            parent:
+                                parentCandidates
+                                    .where(
+                                      (unit) => unit.id == parentUnitId,
+                                    )
+                                    .firstOrNull,
+                            unitsPerParent:
+                                double.tryParse(unitsPerParent.text.trim()) ?? 0,
+                            baseUnit:
+                                ProductUnitHierarchy.baseUnit(orderedUnits),
+                          ),
+                        ] else
+                          const ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.lock_outline),
+                            title: Text('وحدة الأساس للمخزون'),
+                            subtitle: Text(
+                              'معاملها 1 ولا يمكن تحويلها إلى عبوة بعد إنشاء المنتج.',
+                            ),
+                          ),
                         const SizedBox(height: 8),
                         TextField(
                           controller: salePrice,
@@ -215,15 +419,6 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                           decoration: const InputDecoration(
                             labelText: 'سعر البيع',
                           ),
-                        ),
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          value: primary,
-                          onChanged:
-                              existing?.isPrimary == true
-                                  ? null
-                                  : (v) => setLocal(() => primary = v ?? false),
-                          title: const Text('اجعلها الوحدة الرئيسية'),
                         ),
                       ],
                     ),
@@ -249,9 +444,12 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
               productId: productId,
               id: existing?.id,
               name: name.text,
-              factor: double.parse(factor.text),
+              parentUnitId: isBase ? null : parentUnitId,
+              unitsPerParent:
+                  isBase
+                      ? 1
+                      : double.parse(unitsPerParent.text.trim()),
               salePriceMinor: Money.fromMajor(salePrice.text),
-              isPrimary: primary,
             );
         setState(() => revision++);
         ref.read(dataRevisionProvider.notifier).state++;
@@ -260,7 +458,7 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
       }
     }
     name.dispose();
-    factor.dispose();
+    unitsPerParent.dispose();
     salePrice.dispose();
   }
 
@@ -275,7 +473,17 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
           : value.toString();
 
   Future<void> _addBarcode(List<ProductUnit> units) async {
-    var unitId = units.first.id!;
+    final selectableUnits = <ProductUnit>[
+      ...{
+        for (final unit in units)
+          if (unit.id != null) unit.id!: unit,
+      }.values,
+    ];
+    if (selectableUnits.isEmpty) {
+      CustomSnackBar.showWarningSnackbar('أضف وحدة للمنتج أولاً');
+      return;
+    }
+    var unitId = selectableUnits.first.id!;
     final code = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -290,9 +498,9 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         DropdownButtonFormField<String>(
-                          value: unitId,
+                          initialValue: unitId,
                           items:
-                              units
+                              selectableUnits
                                   .map(
                                     (u) => DropdownMenuItem(
                                       value: u.id!,
@@ -343,60 +551,52 @@ class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
     }
     code.dispose();
   }
+}
 
-  Future<void> _addSpecification(String productId) async {
-    final title = TextEditingController();
-    final value = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder:
-          (dialogContext) => AlertDialog(
-            title: const Text('إضافة مواصفة'),
-            content: SizedBox(
-              width: responsiveDialogWidth(context, 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: title,
-                    decoration: const InputDecoration(labelText: 'العنوان'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: value,
-                    decoration: const InputDecoration(labelText: 'القيمة'),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('إلغاء'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('حفظ'),
-              ),
-            ],
-          ),
-    );
-    if (ok == true) {
-      try {
-        await ref
-            .read(masterDataRepositoryProvider)
-            .addProductSpecification(
-              productId: productId,
-              title: title.text,
-              value: value.text,
-            );
-        setState(() => revision++);
-        ref.read(dataRevisionProvider.notifier).state++;
-      } catch (e) {
-        if (mounted) CustomSnackBar.showErrorSnackbar('$e');
-      }
+class _UnitConversionPreview extends StatelessWidget {
+  const _UnitConversionPreview({
+    required this.unitName,
+    required this.parent,
+    required this.unitsPerParent,
+    required this.baseUnit,
+  });
+
+  final String unitName;
+  final ProductUnit? parent;
+  final double unitsPerParent;
+  final ProductUnit? baseUnit;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedParent = parent;
+    if (selectedParent == null || unitsPerParent <= 1) {
+      return const Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Text('اختر الوحدة الأصغر وأدخل عدداً أكبر من 1.'),
+      );
     }
-    title.dispose();
-    value.dispose();
+    final factor = selectedParent.factor * unitsPerParent;
+    final count = _formatUnitNumber(unitsPerParent);
+    final baseCount = _formatUnitNumber(factor);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: .25),
+        ),
+      ),
+      child: Text(
+        '1 $unitName = $count ${selectedParent.name} = $baseCount ${baseUnit?.name ?? 'وحدة الأساس'}',
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    );
   }
 }
+
+String _formatUnitNumber(double value) =>
+    value == value.truncateToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '');

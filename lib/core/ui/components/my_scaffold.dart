@@ -44,9 +44,10 @@ class MyScaffold extends StatelessWidget {
     final colors = context.colors;
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final isWindows =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    final paintBackground = forceWindowsBackground || isAndroid || isWindows;
+    // Desktop pages are hosted by AppShell, which paints one continuous
+    // application backdrop. Painting again here made the artwork appear in
+    // dialogs and individual pages instead of behind the whole app.
+    final paintBackground = forceWindowsBackground || isAndroid;
 
     final pageBody = Stack(
       fit: StackFit.expand,
@@ -58,6 +59,8 @@ class MyScaffold extends StatelessWidget {
 
     return Scaffold(
       appBar: appBar,
+      // Navigation on mobile is intentionally provided by the dashboard cards,
+      // not a drawer that competes with the compact working screens.
       drawer: drawer,
       endDrawer: endDrawer,
       resizeToAvoidBottomInset: resizeToAvoidBottomInset,

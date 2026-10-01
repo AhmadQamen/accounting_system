@@ -65,11 +65,7 @@ class FinancialYearsScreen extends ConsumerWidget {
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final narrow = constraints.maxWidth < 680;
-                        final width =
-                            narrow
-                                ? constraints.maxWidth
-                                : (constraints.maxWidth - 12) / 2;
+                        final width = (constraints.maxWidth - 12) / 2;
                         return Wrap(
                           spacing: 12,
                           runSpacing: 12,

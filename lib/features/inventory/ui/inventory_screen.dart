@@ -92,11 +92,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final narrow = constraints.maxWidth < 700;
+                        final columns = constraints.maxWidth < 700 ? 2 : 3;
                         final width =
-                            narrow
-                                ? constraints.maxWidth
-                                : (constraints.maxWidth - 24) / 3;
+                            (constraints.maxWidth - ((columns - 1) * 12)) /
+                            columns;
                         final stats = [
                           (
                             'قيمة المخزون',
@@ -239,11 +238,17 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
         currencyCode: currency,
       );
 
+  String _quantity(double value) =>
+      value == value.truncateToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '');
+
   Future<void> _opening() async {
-    final products =
-        await ref.read(masterDataRepositoryProvider).listProducts();
+    final inventoryRepository = ref.read(inventoryRepositoryProvider);
+    final products = await ref.read(masterDataRepositoryProvider).listProducts();
     final warehouses =
         await ref.read(masterDataRepositoryProvider).listWarehouses();
+    final currentInventory = await inventoryRepository.listInventory();
     if (!mounted) return;
     if (products.isEmpty) {
       CustomSnackBar.showWarningSnackbar('أنشئ منتجاً أولاً');
@@ -257,121 +262,266 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     String productId = products.first.id!;
     String warehouseId = warehouses.first.id!;
     final qty = TextEditingController();
-    final value = TextEditingController();
+    final unitCost = TextEditingController(
+      text: _moneyInput(products.first.costPriceMinor),
+    );
+    final currency =
+        ref.read(localContextProvider).asData?.value.currencyCode ?? 'IQD';
     final ok = await showDialog<bool>(
       context: context,
       builder:
           (ctx) => StatefulBuilder(
-            builder:
-                (ctx, setLocal) => AlertDialog(
-                  title: Row(
-                    children: [
-                      Icon(
-                        Icons.add_box_outlined,
-                        color: context.colors.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      const Text('رصيد افتتاحي'),
-                    ],
-                  ),
-                  content: SizedBox(
-                    width: responsiveDialogWidth(context, 450),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        DropdownButtonFormField<String>(
-                          value: productId,
-                          items:
-                              products
-                                  .map(
-                                    (p) => DropdownMenuItem(
-                                      value: p.id!,
-                                      child: Text(p.name),
-                                    ),
-                                  )
-                                  .toList(),
-                          onChanged: (v) {
-                            if (v != null) setLocal(() => productId = v);
-                          },
-                          decoration: const InputDecoration(
-                            labelText: 'المنتج',
-                            prefixIcon: Icon(Iconsax.box),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        DropdownButtonFormField<String>(
-                          value: warehouseId,
-                          items:
-                              warehouses
-                                  .map(
-                                    (p) => DropdownMenuItem(
-                                      value: p.id!,
-                                      child: Text(p.name),
-                                    ),
-                                  )
-                                  .toList(),
-                          onChanged: (v) {
-                            if (v != null) setLocal(() => warehouseId = v);
-                          },
-                          decoration: const InputDecoration(
-                            labelText: 'المستودع',
-                            prefixIcon: Icon(Iconsax.buildings_2),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: qty,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'الكمية',
-                            prefixIcon: Icon(Icons.straighten_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: value,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'إجمالي قيمة المخزون',
-                            prefixIcon: Icon(Icons.payments_outlined),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('إلغاء'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      icon: const Icon(Iconsax.tick_circle, size: 17),
-                      label: const Text('اعتماد'),
-                    ),
+            builder: (ctx, setLocal) {
+              final selectedProduct = products.firstWhere(
+                (product) => product.id == productId,
+              );
+              final enteredQty = double.tryParse(qty.text.trim()) ?? 0;
+              final enteredUnitCost = _tryMoney(unitCost.text);
+              final calculatedTotal = Money.multiplyByQuantity(
+                enteredUnitCost,
+                enteredQty,
+              );
+              final matchingInventory =
+                  currentInventory
+                      .where(
+                        (item) =>
+                            item.productId == productId &&
+                            item.warehouseId == warehouseId,
+                      )
+                      .firstOrNull;
+              final currentQuantity =
+                  matchingInventory?.currentQuantity ?? 0;
+              final currentValue =
+                  matchingInventory?.inventoryValueMinor ?? 0;
+              final currentAverage =
+                  currentQuantity > 0
+                      ? Money.divideByQuantity(currentValue, currentQuantity)
+                      : 0;
+              final projectedQuantity = currentQuantity + enteredQty;
+              final projectedAverage =
+                  projectedQuantity > 0
+                      ? Money.divideByQuantity(
+                        currentValue + calculatedTotal,
+                        projectedQuantity,
+                      )
+                      : 0;
+              return AlertDialog(
+                title: Row(
+                  children: [
+                    Icon(Icons.add_box_outlined, color: context.colors.primary),
+                    const SizedBox(width: 10),
+                    const Text('رصيد افتتاحي'),
                   ],
                 ),
+                content: SizedBox(
+                  width: responsiveDialogWidth(context, 450),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: productId,
+                        items:
+                            products
+                                .map(
+                                  (p) => DropdownMenuItem(
+                                    value: p.id!,
+                                    child: Text(p.name),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setLocal(() {
+                              productId = v;
+                              final product = products.firstWhere(
+                                (item) => item.id == v,
+                              );
+                              unitCost.text = _moneyInput(
+                                product.costPriceMinor,
+                              );
+                            });
+                          }
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'المنتج',
+                          prefixIcon: Icon(Iconsax.box),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: warehouseId,
+                        items:
+                            warehouses
+                                .map(
+                                  (p) => DropdownMenuItem(
+                                    value: p.id!,
+                                    child: Text(p.name),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (v) {
+                          if (v != null) setLocal(() => warehouseId = v);
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'المستودع',
+                          prefixIcon: Icon(Iconsax.buildings_2),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: qty,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setLocal(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'الكمية',
+                          prefixIcon: Icon(Icons.straighten_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: unitCost,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setLocal(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'كلفة الوحدة الافتتاحية',
+                          prefixIcon: Icon(Icons.price_check_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: context.colors.primary.withValues(alpha: .08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: context.colors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'سعر الكلفة المرجعي: ${_money(context, selectedProduct.costPriceMinor, currency)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'إجمالي قيمة الرصيد: ${_money(context, calculatedTotal, currency)}',
+                              style: TextStyle(
+                                color: context.colors.textSecondary,
+                              ),
+                            ),
+                            if (currentQuantity > 0) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'المتوسط المرجّح الحالي: ${_money(context, currentAverage, currency)} • الكمية: ${_quantity(currentQuantity)}',
+                                style: TextStyle(
+                                  color: context.colors.textSecondary,
+                                ),
+                              ),
+                            ],
+                            if (enteredQty > 0) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'المتوسط المرجّح بعد الإضافة: ${_money(context, projectedAverage, currency)}',
+                                style: TextStyle(
+                                  color: context.colors.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 3),
+                            Text(
+                              'يمكنك تغيير كلفة الوحدة لهذا الرصيد فقط دون تعديل السعر المرجعي للمنتج.',
+                              style: TextStyle(
+                                color: context.colors.textDim,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('إلغاء'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    icon: const Icon(Iconsax.tick_circle, size: 17),
+                    label: const Text('اعتماد'),
+                  ),
+                ],
+              );
+            },
           ),
     );
     if (ok == true) {
       final parsedQty = double.tryParse(qty.text.trim());
       if (parsedQty == null || parsedQty <= 0) {
-        if (mounted)
+        if (mounted) {
           CustomSnackBar.showWarningSnackbar('أدخل كمية صحيحة أكبر من صفر');
+        }
       } else {
-        await ref
-            .read(inventoryRepositoryProvider)
-            .addOpeningBalance(
-              productId: productId,
-              warehouseId: warehouseId,
-              quantity: parsedQty,
-              totalValueMinor: Money.fromMajor(value.text),
+        final unitCostMinor = _tryParseMoney(unitCost.text);
+        if (unitCostMinor == null) {
+          if (mounted) {
+            CustomSnackBar.showWarningSnackbar('أدخل كلفة وحدة صحيحة');
+          }
+        } else if (unitCostMinor < 0) {
+          if (mounted) {
+            CustomSnackBar.showWarningSnackbar(
+              'كلفة الوحدة لا يمكن أن تكون سالبة',
             );
-        ref.read(dataRevisionProvider.notifier).state++;
+          }
+        } else {
+          try {
+            await inventoryRepository.addOpeningBalance(
+                  productId: productId,
+                  warehouseId: warehouseId,
+                  quantity: parsedQty,
+                  totalValueMinor: Money.multiplyByQuantity(
+                    unitCostMinor,
+                    parsedQty,
+                  ),
+                );
+            ref.read(dataRevisionProvider.notifier).state++;
+          } catch (error) {
+            if (mounted) {
+              CustomSnackBar.showErrorSnackbar(
+                'تعذر إضافة الرصيد: $error',
+                copyText: '$error',
+              );
+            }
+          }
+        }
       }
     }
     qty.dispose();
-    value.dispose();
+    unitCost.dispose();
+  }
+
+  String _moneyInput(int minor) {
+    final major = Money(minor).major;
+    return major == major.truncateToDouble()
+        ? major.toStringAsFixed(0)
+        : major.toStringAsFixed(2);
+  }
+
+  int _tryMoney(String value) {
+    return _tryParseMoney(value) ?? 0;
+  }
+
+  int? _tryParseMoney(String value) {
+    try {
+      return Money.fromMajor(value);
+    } catch (_) {
+      return null;
+    }
   }
 }
 

@@ -1,5 +1,5 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
 import 'app_theme_colors.dart';
 
@@ -77,34 +77,36 @@ abstract final class AppTheme {
     required AppThemeColors colors,
   }) {
     final dark = brightness == Brightness.dark;
-    // Use bundled system fonts on desktop. This keeps startup fully offline
-    // and avoids runtime font downloads/failures. Segoe UI has strong Arabic
-    // support on Windows; Tahoma/Arial are fallbacks on other platforms.
+    // Tajawal is used for every Arabic text style. System fonts remain a
+    // graceful fallback when the Google Fonts cache is not available yet.
     final baseText =
         dark ? Typography.whiteMountainView : Typography.blackMountainView;
-    final textTheme = baseText.copyWith(
-      headlineLarge: baseText.headlineLarge?.copyWith(
+    final tajawalBase = GoogleFonts.tajawalTextTheme(baseText);
+    final textTheme = tajawalBase.copyWith(
+      headlineLarge: tajawalBase.headlineLarge?.copyWith(
         fontWeight: FontWeight.w900,
         letterSpacing: -.7,
       ),
-      headlineMedium: baseText.headlineMedium?.copyWith(
+      headlineMedium: tajawalBase.headlineMedium?.copyWith(
         fontWeight: FontWeight.w900,
         letterSpacing: -.5,
       ),
-      headlineSmall: baseText.headlineSmall?.copyWith(
+      headlineSmall: tajawalBase.headlineSmall?.copyWith(
         fontWeight: FontWeight.w900,
         letterSpacing: -.4,
       ),
-      titleLarge: baseText.titleLarge?.copyWith(
+      titleLarge: tajawalBase.titleLarge?.copyWith(
         fontWeight: FontWeight.w800,
         letterSpacing: -.25,
       ),
-      titleMedium: baseText.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-      titleSmall: baseText.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-      bodyLarge: baseText.bodyLarge?.copyWith(height: 1.45),
-      bodyMedium: baseText.bodyMedium?.copyWith(height: 1.45),
-      bodySmall: baseText.bodySmall?.copyWith(height: 1.4),
-      labelLarge: baseText.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+      titleMedium: tajawalBase.titleMedium?.copyWith(
+        fontWeight: FontWeight.w800,
+      ),
+      titleSmall: tajawalBase.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      bodyLarge: tajawalBase.bodyLarge?.copyWith(height: 1.45),
+      bodyMedium: tajawalBase.bodyMedium?.copyWith(height: 1.45),
+      bodySmall: tajawalBase.bodySmall?.copyWith(height: 1.4),
+      labelLarge: tajawalBase.labelLarge?.copyWith(fontWeight: FontWeight.w800),
     );
 
     final scheme = ColorScheme(
@@ -135,8 +137,8 @@ abstract final class AppTheme {
       disabledColor: colors.textDim,
       splashFactory: InkRipple.splashFactory,
       visualDensity: VisualDensity.standard,
-      fontFamily: 'Segoe UI',
-      fontFamilyFallback: const ['Tahoma', 'Arial'],
+      fontFamily: GoogleFonts.tajawal().fontFamily,
+      fontFamilyFallback: const ['Segoe UI', 'Tahoma', 'Arial'],
       textTheme: textTheme,
       primaryTextTheme: textTheme,
       extensions: [colors],
@@ -164,12 +166,14 @@ abstract final class AppTheme {
       cardTheme: CardThemeData(
         elevation: 0,
         margin: EdgeInsets.zero,
-        color: colors.bgElevated,
+        color: colors.bgElevated.withValues(alpha: dark ? .76 : .96),
         surfaceTintColor: Colors.transparent,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: colors.border),
+          side: BorderSide(
+            color: colors.textPrimary.withValues(alpha: dark ? .11 : .12),
+          ),
         ),
       ),
       dialogTheme: DialogThemeData(

@@ -1,9 +1,11 @@
 import 'package:accounting_system/core/domain/money.dart';
+import 'package:accounting_system/core/domain/party_balance.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
-import 'package:accounting_system/features/master_data/ui/party_details_dialog.dart';
+import 'package:accounting_system/core/navigation/app_navigation.dart';
+import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -114,11 +116,10 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final narrow = constraints.maxWidth < 680;
+                        final columns = constraints.maxWidth < 680 ? 2 : 3;
                         final width =
-                            narrow
-                                ? constraints.maxWidth
-                                : (constraints.maxWidth - 24) / 3;
+                            (constraints.maxWidth - ((columns - 1) * 12)) /
+                            columns;
                         final stats = [
                           (
                             'عدد السجلات',
@@ -239,12 +240,11 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
                                   row: entry.$2,
                                   currency: currency,
                                   onTap:
-                                      () => showDialog(
-                                        context: context,
-                                        builder:
-                                            (_) => PartyDetailsDialog(
-                                              party: entry.$2,
-                                            ),
+                                      () => AppNavigation.open(
+                                        AppRoute(
+                                          type: RouteType.partyDetails,
+                                          args: entry.$2,
+                                        ),
                                       ),
                                   onEdit: () => _edit(row: entry.$2),
                                   onArchive: () => _archive(entry.$2),
@@ -439,16 +439,11 @@ class _PartyRow extends StatelessWidget {
             : 'عميل ومورد';
     final name = row.name;
     final initial = name.trim().isEmpty ? '؟' : name.trim().substring(0, 1);
-    final balanceText = Money(balance.abs()).format(
+    final balanceText = Money(balance.partyDisplayAmountMinor).format(
       locale: Localizations.localeOf(context).toString(),
       currencyCode: currency,
     );
-    final balanceCaption =
-        balance > 0
-            ? 'مدين لنا'
-            : balance < 0
-            ? 'مستحق له'
-            : 'متوازن';
+    final balanceCaption = balance.partyBalanceLabel;
 
     final avatar = Container(
       width: 42,

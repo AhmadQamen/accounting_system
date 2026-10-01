@@ -32,6 +32,37 @@ class IncompleteInitialSyncException implements Exception {
       'لم تُعتمد المزامنة ولم يُرسل ack.';
 }
 
+class IncompleteSyncException implements Exception {
+  const IncompleteSyncException({
+    required this.failed,
+    required this.rejected,
+    required this.conflicts,
+    required this.pending,
+    this.details,
+  });
+
+  final int failed;
+  final int rejected;
+  final int conflicts;
+  final int pending;
+  final String? details;
+
+  @override
+  String toString() {
+    final counts = <String>[
+      if (failed > 0) '$failed فاشلة',
+      if (rejected > 0) '$rejected مرفوضة',
+      if (conflicts > 0) '$conflicts متعارضة',
+      if (pending > 0) '$pending معلّقة',
+    ].join('، ');
+    final reason =
+        details == null || details!.trim().isEmpty
+            ? ''
+            : ' السبب: ${details!.trim()}';
+    return 'لم تكتمل المزامنة؛ توجد عمليات غير محسومة ($counts).$reason';
+  }
+}
+
 class SyncEngine {
   SyncEngine({
     required SyncTransport transport,
@@ -140,6 +171,11 @@ class SyncEngine {
         where: 'entity_id=?',
         whereArgs: [context.entityId],
       );
+      // A successful HTTP round-trip is not a successful sync when the server
+      // rejected an event, reported a conflict, or an outbox row is still
+      // unresolved.  Keep the previous last_sync_at and surface the real
+      // failure to the UI instead of showing a false "completed" state.
+      await _assertNoUnresolvedOperations(db, context.entityId);
       await db.update(
         'sync_entity_state',
         {
@@ -204,8 +240,7 @@ ORDER BY created_at DESC
     await db.update(
       'sync_outbox',
       {'status': 'pending', 'last_error': null, 'next_retry_at': null},
-      where:
-          'entity_id=? AND event_id=? AND status IN (\'failed\', \'rejected\')',
+      where: "entity_id=? AND event_id=? AND status = 'failed'",
       whereArgs: [context.entityId, eventId],
     );
   }
@@ -298,13 +333,9 @@ ORDER BY created_at DESC
       // Snapshot v1.1 contains cashboxes only. It is not a complete business
       // snapshot, so its sequence is a completeness target, never a cursor.
       // A new/rebuilt device must replay from the server-declared sequence.
-      final currentCursor = await _readCursor(transaction, context.entityId);
-      final replayCursor =
-          rebuild
-              ? response.replayFromSequence
-              : currentCursor > response.replayFromSequence
-              ? currentCursor
-              : response.replayFromSequence;
+      // An incomplete device cannot trust its old cursor. Always restart at
+      // the server-declared replay point so historical events are not skipped.
+      final replayCursor = response.replayFromSequence;
       await transaction.update(
         'sync_entity_state',
         {
@@ -320,7 +351,7 @@ ORDER BY created_at DESC
         'sync_cursors',
         {
           'server_sequence': replayCursor,
-          if (rebuild) 'last_acknowledged_sequence': 0,
+          'last_acknowledged_sequence': 0,
           'updated_at': now,
         },
         where: 'entity_id=?',
@@ -647,6 +678,55 @@ ORDER BY created_at DESC
       failed: (failed.first['c'] as num).toInt(),
       lastError: state?['last_error']?.toString(),
       initializationComplete: state?['bootstrap_completed'] == 1,
+    );
+  }
+
+  Future<void> _assertNoUnresolvedOperations(
+    Database db,
+    String entityId,
+  ) async {
+    final rows = await db.rawQuery(
+      '''
+SELECT
+  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+  SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected,
+  SUM(CASE WHEN status='conflict' THEN 1 ELSE 0 END) AS conflict_outbox,
+  SUM(CASE WHEN status IN ('pending','syncing') THEN 1 ELSE 0 END) AS pending
+FROM sync_outbox
+WHERE entity_id=?
+''',
+      [entityId],
+    );
+    final row = rows.single;
+    final openConflicts = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM sync_conflicts WHERE entity_id=? AND status='open'",
+      [entityId],
+    );
+    final failed = ((row['failed'] as num?) ?? 0).toInt();
+    final rejected = ((row['rejected'] as num?) ?? 0).toInt();
+    final pending = ((row['pending'] as num?) ?? 0).toInt();
+    final outboxConflicts = ((row['conflict_outbox'] as num?) ?? 0).toInt();
+    final conflictRows = ((openConflicts.single['c'] as num?) ?? 0).toInt();
+    final conflicts =
+        outboxConflicts > conflictRows ? outboxConflicts : conflictRows;
+    if (failed == 0 && rejected == 0 && conflicts == 0 && pending == 0) return;
+
+    final errorRows = await db.query(
+      'sync_outbox',
+      columns: ['last_error'],
+      where:
+          "entity_id=? AND status IN ('failed','rejected','conflict') AND last_error IS NOT NULL",
+      whereArgs: [entityId],
+      orderBy: 'created_at ASC',
+      limit: 1,
+    );
+    throw IncompleteSyncException(
+      failed: failed,
+      rejected: rejected,
+      conflicts: conflicts,
+      pending: pending,
+      details:
+          errorRows.isEmpty ? null : errorRows.single['last_error']?.toString(),
     );
   }
 

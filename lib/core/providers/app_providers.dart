@@ -1,6 +1,7 @@
 import 'package:accounting_system/core/db/app_database.dart';
 import 'package:accounting_system/core/network/dio_factory.dart';
 import 'package:accounting_system/core/shortcuts/keyboard_shortcut_service.dart';
+import 'package:accounting_system/core/shortcuts/invoice_shortcut_macro_service.dart';
 import 'package:accounting_system/features/auth/data/auth_session_manager.dart';
 import 'package:accounting_system/features/auth/data/token_storage.dart';
 import 'package:dio/dio.dart';
@@ -38,5 +39,6 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 final appInitializerProvider = FutureProvider<void>((ref) async {
   await AppDatabase.instance.database;
   await KeyboardShortcutService.instance.insertDefaults();
+  await InvoiceShortcutMacroService().all();
   timeago.setLocaleMessages('ar', timeago.ArMessages());
 });

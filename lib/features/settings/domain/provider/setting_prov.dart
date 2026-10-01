@@ -35,6 +35,10 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     _saveAndUpdate(state.copyWith(themeMode: themeMode));
   }
 
+  void changeFontScale(double fontScale) {
+    _saveAndUpdate(state.copyWith(fontScale: fontScale));
+  }
+
   Future<void> toggleNotifications() async {
     final enabled = !state.notificationsEnabled;
     await _saveAndUpdate(state.copyWith(notificationsEnabled: enabled));

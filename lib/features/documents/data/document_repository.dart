@@ -7,8 +7,26 @@ import 'package:accounting_system/core/services/cash_ledger_service.dart';
 import 'package:accounting_system/core/services/inventory_ledger_service.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
 import 'package:accounting_system/core/services/party_ledger_service.dart';
+import 'package:accounting_system/core/services/general_ledger_service.dart';
 import 'package:accounting_system/features/documents/models/document_models.dart';
 import 'package:sqflite/sqflite.dart';
+
+class SaleStockShortage {
+  const SaleStockShortage({
+    required this.inventoryItemId,
+    required this.productName,
+    required this.availableBaseQuantity,
+    required this.requestedBaseQuantity,
+  });
+
+  final String inventoryItemId;
+  final String productName;
+  final double availableBaseQuantity;
+  final double requestedBaseQuantity;
+
+  double get resultingBaseQuantity =>
+      availableBaseQuantity - requestedBaseQuantity;
+}
 
 class DocumentRepository {
   DocumentRepository(this._database);
@@ -16,6 +34,7 @@ class DocumentRepository {
   final _inventory = const InventoryLedgerService();
   final _cash = const CashLedgerService();
   final _party = const PartyLedgerService();
+  final _generalLedger = const GeneralLedgerService();
   final _outbox = const OutboxService();
 
   Future<List<AccountingDocument>> listDocuments(String type) async {
@@ -65,6 +84,11 @@ ORDER BY d.occurred_at DESC LIMIT 500
     int discountMinor = 0,
     int paidMinor = 0,
     String? note,
+    String? currencyCode,
+    int exchangeRateMicros = 1000000,
+    int? foreignSubtotalMinor,
+    int? foreignDiscountMinor,
+    int? foreignPaidMinor,
     required List<SaleLineInput> items,
   }) async {
     if (items.isEmpty) throw ArgumentError('Sale needs at least one item');
@@ -92,6 +116,14 @@ ORDER BY d.occurred_at DESC LIMIT 500
         'discount_minor': discountMinor,
         'final_minor': finalMinor,
         'paid_minor': paidMinor,
+        'currency_code': currencyCode ?? ctx.currencyCode,
+        'exchange_rate_micros': exchangeRateMicros,
+        'foreign_subtotal_minor': foreignSubtotalMinor ?? subtotal,
+        'foreign_discount_minor': foreignDiscountMinor ?? discountMinor,
+        'foreign_final_minor':
+            (foreignSubtotalMinor ?? subtotal) -
+            (foreignDiscountMinor ?? discountMinor),
+        'foreign_paid_minor': foreignPaidMinor ?? paidMinor,
         'cashbox_id': cashboxId ?? ctx.defaultCashboxId,
         'note': note,
         'occurred_at': now.toIso8601String(),
@@ -108,7 +140,180 @@ ORDER BY d.occurred_at DESC LIMIT 500
     return id;
   }
 
-  Future<void> postSale(String saleId) async {
+  Future<void> updateSaleDraft({
+    required String saleId,
+    String? partyId,
+    String? cashboxId,
+    int discountMinor = 0,
+    int paidMinor = 0,
+    String? note,
+    String? currencyCode,
+    int exchangeRateMicros = 1000000,
+    int? foreignSubtotalMinor,
+    int? foreignDiscountMinor,
+    int? foreignPaidMinor,
+    required List<SaleLineInput> items,
+  }) async {
+    if (items.isEmpty) throw ArgumentError('Sale needs at least one item');
+    final ctx = await LocalContextService.instance.current;
+    final now = DateTime.now().toUtc();
+    await _database.transaction((txn) async {
+      final current = await _single(txn, 'sales', saleId);
+      if (current['entity_id'] != ctx.entityId ||
+          current['status'] != 'draft') {
+        throw StateError('Only the current entity draft can be updated');
+      }
+      final subtotal = items.fold<int>(0, (sum, e) => sum + e.lineTotalMinor);
+      if (discountMinor < 0 || discountMinor > subtotal) {
+        throw ArgumentError('Invalid discount');
+      }
+      final finalMinor = subtotal - discountMinor;
+      if (paidMinor < 0 || paidMinor > finalMinor) {
+        throw ArgumentError('Invalid paid amount');
+      }
+      await txn.update(
+        'sales',
+        {
+          'party_id': partyId,
+          'cashbox_id': cashboxId ?? ctx.defaultCashboxId,
+          'subtotal_minor': subtotal,
+          'discount_minor': discountMinor,
+          'final_minor': finalMinor,
+          'paid_minor': paidMinor,
+          'currency_code': currencyCode ?? ctx.currencyCode,
+          'exchange_rate_micros': exchangeRateMicros,
+          'foreign_subtotal_minor': foreignSubtotalMinor ?? subtotal,
+          'foreign_discount_minor': foreignDiscountMinor ?? discountMinor,
+          'foreign_final_minor':
+              (foreignSubtotalMinor ?? subtotal) -
+              (foreignDiscountMinor ?? discountMinor),
+          'foreign_paid_minor': foreignPaidMinor ?? paidMinor,
+          'note': note,
+          'updated_at': now.toIso8601String(),
+        },
+        where: 'id=? AND entity_id=? AND status=\'draft\'',
+        whereArgs: [saleId, ctx.entityId],
+      );
+      await txn.delete('sale_items', where: 'sale_id=?', whereArgs: [saleId]);
+      for (final item in items) {
+        await txn.insert(
+          'sale_items',
+          item.toSql(entityId: ctx.entityId, saleId: saleId, now: now),
+        );
+      }
+    });
+  }
+
+  Future<void> deleteDraft({
+    required String documentId,
+    required String type,
+  }) async {
+    if (type != 'sale' && type != 'purchase') {
+      throw ArgumentError.value(type, 'type', 'Unsupported draft type');
+    }
+    final ctx = await LocalContextService.instance.current;
+    final table = type == 'sale' ? 'sales' : 'purchase_invoices';
+    final itemsTable = type == 'sale' ? 'sale_items' : 'purchase_items';
+    final foreignKey = type == 'sale' ? 'sale_id' : 'purchase_invoice_id';
+    await _database.transaction((txn) async {
+      final rows = await txn.query(
+        table,
+        columns: const ['status'],
+        where: 'id=? AND entity_id=?',
+        whereArgs: [documentId, ctx.entityId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return;
+      if (rows.single['status'] != 'draft') {
+        throw StateError('Only drafts can be deleted');
+      }
+      await txn.delete(
+        itemsTable,
+        where: '$foreignKey=? AND entity_id=?',
+        whereArgs: [documentId, ctx.entityId],
+      );
+      await txn.delete(
+        table,
+        where: 'id=? AND entity_id=? AND status=\'draft\'',
+        whereArgs: [documentId, ctx.entityId],
+      );
+    });
+  }
+
+  Future<List<SaleStockShortage>> saleStockShortages(
+    List<SaleLineInput> items,
+  ) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final requested = <String, double>{};
+    for (final item in items) {
+      requested.update(
+        item.inventoryItemId,
+        (value) => value + item.baseQuantity,
+        ifAbsent: () => item.baseQuantity,
+      );
+    }
+    return _saleStockShortages(db, ctx.entityId, requested);
+  }
+
+  Future<List<SaleStockShortage>> saleDraftStockShortages(String saleId) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final rows = await db.rawQuery(
+      '''
+SELECT inventory_item_id, SUM(base_quantity) AS requested
+FROM sale_items
+WHERE sale_id=? AND entity_id=? AND deleted_at IS NULL
+GROUP BY inventory_item_id
+''',
+      [saleId, ctx.entityId],
+    );
+    return _saleStockShortages(db, ctx.entityId, {
+      for (final row in rows)
+        row['inventory_item_id'] as String:
+            (row['requested'] as num).toDouble(),
+    });
+  }
+
+  Future<List<SaleStockShortage>> _saleStockShortages(
+    DatabaseExecutor db,
+    String entityId,
+    Map<String, double> requested,
+  ) async {
+    final shortages = <SaleStockShortage>[];
+    for (final entry in requested.entries) {
+      final rows = await db.rawQuery(
+        '''
+SELECT i.current_quantity, p.name AS product_name
+FROM inventory_items i
+JOIN products p ON p.id=i.product_id AND p.entity_id=i.entity_id
+WHERE i.id=? AND i.entity_id=?
+LIMIT 1
+''',
+        [entry.key, entityId],
+      );
+      if (rows.isEmpty) {
+        throw StateError('تعذر العثور على رصيد المخزون للبند ${entry.key}');
+      }
+      final available = (rows.single['current_quantity'] as num).toDouble();
+      if (available + 0.0000001 < entry.value) {
+        shortages.add(
+          SaleStockShortage(
+            inventoryItemId: entry.key,
+            productName: rows.single['product_name']?.toString() ?? 'منتج',
+            availableBaseQuantity: available,
+            requestedBaseQuantity: entry.value,
+          ),
+        );
+      }
+    }
+    return shortages;
+  }
+
+  Future<void> postSale(
+    String saleId, {
+    bool allowNegativeStock = false,
+  }) async {
     AppLogger.info('post_sale', {'id': saleId});
     final ctx = await LocalContextService.instance.current;
     await _database.transaction((txn) async {
@@ -128,6 +333,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
       final finalMinor = (sale['final_minor'] as num).toInt();
       var remainingGross = subtotalMinor;
       var remainingNet = finalMinor;
+      var totalCostMinor = 0;
       for (var index = 0; index < items.length; index++) {
         final item = items[index];
         final lineGross = (item['line_total_minor'] as num).toInt();
@@ -146,12 +352,34 @@ ORDER BY d.occurred_at DESC LIMIT 500
         final inv = await _single(txn, 'inventory_items', inventoryItemId);
         final baseQty = (item['base_quantity'] as num).toDouble();
         final qty = (inv['current_quantity'] as num).toDouble();
-        if (qty + 0.0000001 < baseQty) throw StateError('Insufficient stock');
-        final average = await _inventory.currentAverageUnitCostMinor(
+        if (!allowNegativeStock && qty + 0.0000001 < baseQty) {
+          throw StateError(
+            'المخزون غير كافٍ. أكد البيع بالسالب قبل اعتماد الفاتورة.',
+          );
+        }
+        var average = await _inventory.currentAverageUnitCostMinor(
           txn,
           inventoryItemId,
         );
+        if (average == 0) {
+          final referenceCost = await txn.rawQuery(
+            '''
+SELECT p.cost_price_minor
+FROM inventory_items i
+JOIN products p ON p.id=i.product_id AND p.entity_id=i.entity_id
+WHERE i.id=? AND i.entity_id=?
+LIMIT 1
+''',
+            [inventoryItemId, ctx.entityId],
+          );
+          average =
+              referenceCost.isEmpty
+                  ? 0
+                  : ((referenceCost.single['cost_price_minor'] as num?) ?? 0)
+                      .toInt();
+        }
         final cost = Money.multiplyByQuantity(average, baseQty);
+        totalCostMinor += cost;
         await txn.update(
           'sale_items',
           {
@@ -208,6 +436,11 @@ ORDER BY d.occurred_at DESC LIMIT 500
           direction: 'in',
           kind: 'sale_payment',
           amountMinor: paidMinor,
+          currencyCode: sale['currency_code']?.toString() ?? ctx.currencyCode,
+          exchangeRateMicros:
+              (sale['exchange_rate_micros'] as num?)?.toInt() ?? 1000000,
+          foreignAmountMinor:
+              (sale['foreign_paid_minor'] as num?)?.toInt() ?? paidMinor,
           referenceType: 'sale',
           referenceId: saleId,
           partyId: partyId,
@@ -243,6 +476,51 @@ ORDER BY d.occurred_at DESC LIMIT 500
         where: 'id=?',
         whereArgs: [saleId],
       );
+      final cashboxId = (sale['cashbox_id'] as String?) ?? ctx.defaultCashboxId;
+      final cashAccount =
+          paidMinor > 0
+              ? await _generalLedger.ensureCashboxAccount(
+                txn,
+                entityId: ctx.entityId,
+                cashboxId: cashboxId,
+              )
+              : null;
+      final receivable = await _requiredAccount(txn, ctx.entityId, '130');
+      final salesAccount = await _requiredAccount(txn, ctx.entityId, '410');
+      final inventoryAccount = await _requiredAccount(txn, ctx.entityId, '120');
+      final costAccount = await _requiredAccount(txn, ctx.entityId, '510');
+      await _generalLedger.postEntryWithAccountIds(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: ctx.financialYearId,
+        sourceType: 'sale',
+        sourceId: saleId,
+        occurredAt: DateTime.parse(sale['occurred_at'] as String),
+        note: sale['note'] as String?,
+        lines: [
+          if (paidMinor > 0)
+            (accountId: cashAccount!, amountMinor: paidMinor, isDebit: true),
+          if (finalMinor - paidMinor > 0)
+            (
+              accountId: receivable,
+              amountMinor: finalMinor - paidMinor,
+              isDebit: true,
+            ),
+          (accountId: salesAccount, amountMinor: finalMinor, isDebit: false),
+          if (totalCostMinor > 0)
+            (
+              accountId: costAccount,
+              amountMinor: totalCostMinor,
+              isDebit: true,
+            ),
+          if (totalCostMinor > 0)
+            (
+              accountId: inventoryAccount,
+              amountMinor: totalCostMinor,
+              isDebit: false,
+            ),
+        ],
+      );
       await _enqueueDocumentEvent(
         txn,
         ctx.entityId,
@@ -262,6 +540,11 @@ ORDER BY d.occurred_at DESC LIMIT 500
     int paidMinor = 0,
     String? note,
     String? supplierInvoiceNumber,
+    String? currencyCode,
+    int exchangeRateMicros = 1000000,
+    int? foreignSubtotalMinor,
+    int? foreignDiscountMinor,
+    int? foreignPaidMinor,
     required List<PurchaseLineInput> items,
   }) async {
     if (items.isEmpty) throw ArgumentError('Purchase needs at least one item');
@@ -288,6 +571,14 @@ ORDER BY d.occurred_at DESC LIMIT 500
         'discount_minor': discountMinor,
         'final_minor': finalMinor,
         'paid_minor': paidMinor,
+        'currency_code': currencyCode ?? ctx.currencyCode,
+        'exchange_rate_micros': exchangeRateMicros,
+        'foreign_subtotal_minor': foreignSubtotalMinor ?? subtotal,
+        'foreign_discount_minor': foreignDiscountMinor ?? discountMinor,
+        'foreign_final_minor':
+            (foreignSubtotalMinor ?? subtotal) -
+            (foreignDiscountMinor ?? discountMinor),
+        'foreign_paid_minor': foreignPaidMinor ?? paidMinor,
         'cashbox_id': cashboxId ?? ctx.defaultCashboxId,
         'note': note,
         'occurred_at': now.toIso8601String(),
@@ -302,6 +593,73 @@ ORDER BY d.occurred_at DESC LIMIT 500
       }
     });
     return id;
+  }
+
+  Future<void> updatePurchaseDraft({
+    required String purchaseId,
+    required String supplierId,
+    String? cashboxId,
+    int discountMinor = 0,
+    int paidMinor = 0,
+    String? note,
+    String? supplierInvoiceNumber,
+    String? currencyCode,
+    int exchangeRateMicros = 1000000,
+    int? foreignSubtotalMinor,
+    int? foreignDiscountMinor,
+    int? foreignPaidMinor,
+    required List<PurchaseLineInput> items,
+  }) async {
+    if (items.isEmpty) throw ArgumentError('Purchase needs at least one item');
+    final ctx = await LocalContextService.instance.current;
+    final now = DateTime.now().toUtc();
+    await _database.transaction((txn) async {
+      final current = await _single(txn, 'purchase_invoices', purchaseId);
+      if (current['entity_id'] != ctx.entityId ||
+          current['status'] != 'draft') {
+        throw StateError('Only the current entity draft can be updated');
+      }
+      final subtotal = items.fold<int>(0, (sum, e) => sum + e.lineTotalMinor);
+      final finalMinor = subtotal - discountMinor;
+      if (finalMinor < 0 || paidMinor < 0 || paidMinor > finalMinor) {
+        throw ArgumentError('Invalid totals');
+      }
+      await txn.update(
+        'purchase_invoices',
+        {
+          'party_id': supplierId,
+          'cashbox_id': cashboxId ?? ctx.defaultCashboxId,
+          'supplier_invoice_number': supplierInvoiceNumber,
+          'subtotal_minor': subtotal,
+          'discount_minor': discountMinor,
+          'final_minor': finalMinor,
+          'paid_minor': paidMinor,
+          'currency_code': currencyCode ?? ctx.currencyCode,
+          'exchange_rate_micros': exchangeRateMicros,
+          'foreign_subtotal_minor': foreignSubtotalMinor ?? subtotal,
+          'foreign_discount_minor': foreignDiscountMinor ?? discountMinor,
+          'foreign_final_minor':
+              (foreignSubtotalMinor ?? subtotal) -
+              (foreignDiscountMinor ?? discountMinor),
+          'foreign_paid_minor': foreignPaidMinor ?? paidMinor,
+          'note': note,
+          'updated_at': now.toIso8601String(),
+        },
+        where: 'id=? AND entity_id=? AND status=\'draft\'',
+        whereArgs: [purchaseId, ctx.entityId],
+      );
+      await txn.delete(
+        'purchase_items',
+        where: 'purchase_invoice_id=?',
+        whereArgs: [purchaseId],
+      );
+      for (final item in items) {
+        await txn.insert(
+          'purchase_items',
+          item.toSql(entityId: ctx.entityId, purchaseId: purchaseId, now: now),
+        );
+      }
+    });
   }
 
   Future<void> postPurchase(String purchaseId) async {
@@ -388,6 +746,12 @@ ORDER BY d.occurred_at DESC LIMIT 500
           direction: 'out',
           kind: 'purchase_payment',
           amountMinor: paidMinor,
+          currencyCode:
+              purchase['currency_code']?.toString() ?? ctx.currencyCode,
+          exchangeRateMicros:
+              (purchase['exchange_rate_micros'] as num?)?.toInt() ?? 1000000,
+          foreignAmountMinor:
+              (purchase['foreign_paid_minor'] as num?)?.toInt() ?? paidMinor,
           referenceType: 'purchase',
           referenceId: purchaseId,
           partyId: supplierId,
@@ -420,6 +784,38 @@ ORDER BY d.occurred_at DESC LIMIT 500
         },
         where: 'id=?',
         whereArgs: [purchaseId],
+      );
+      final purchaseCashboxId =
+          (purchase['cashbox_id'] as String?) ?? ctx.defaultCashboxId;
+      final cashAccount =
+          paidMinor > 0
+              ? await _generalLedger.ensureCashboxAccount(
+                txn,
+                entityId: ctx.entityId,
+                cashboxId: purchaseCashboxId,
+              )
+              : null;
+      final inventoryAccount = await _requiredAccount(txn, ctx.entityId, '120');
+      final payableAccount = await _requiredAccount(txn, ctx.entityId, '210');
+      await _generalLedger.postEntryWithAccountIds(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: ctx.financialYearId,
+        sourceType: 'purchase',
+        sourceId: purchaseId,
+        occurredAt: DateTime.parse(purchase['occurred_at'] as String),
+        note: purchase['note'] as String?,
+        lines: [
+          (accountId: inventoryAccount, amountMinor: finalMinor, isDebit: true),
+          if (paidMinor > 0)
+            (accountId: cashAccount!, amountMinor: paidMinor, isDebit: false),
+          if (finalMinor - paidMinor > 0)
+            (
+              accountId: payableAccount,
+              amountMinor: finalMinor - paidMinor,
+              isDebit: false,
+            ),
+        ],
       );
       await _enqueueDocumentEvent(
         txn,
@@ -514,6 +910,21 @@ ORDER BY d.occurred_at DESC LIMIT 500
         where: 'id=?',
         whereArgs: [id],
       );
+      final wasteAccount = await _requiredAccount(txn, ctx.entityId, '520');
+      final inventoryAccount = await _requiredAccount(txn, ctx.entityId, '120');
+      await _generalLedger.postEntryWithAccountIds(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: ctx.financialYearId,
+        sourceType: 'waste',
+        sourceId: id,
+        occurredAt: now,
+        note: note,
+        lines: [
+          (accountId: wasteAccount, amountMinor: totalCost, isDebit: true),
+          (accountId: inventoryAccount, amountMinor: totalCost, isDebit: false),
+        ],
+      );
       await _enqueueDocumentEvent(
         txn,
         ctx.entityId,
@@ -547,6 +958,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
       final saleSubtotal = (sale['subtotal_minor'] as num).toInt();
       final saleFinal = (sale['final_minor'] as num).toInt();
       var total = 0;
+      var totalReturnedCost = 0;
       await txn.insert('sale_return_invoices', {
         'id': id,
         'entity_id': ctx.entityId,
@@ -608,6 +1020,7 @@ ORDER BY d.occurred_at DESC LIMIT 500
         if (lineTotal < 0 || cost < 0)
           throw StateError('Invalid return allocation');
         total += lineTotal;
+        totalReturnedCost += cost;
         final itemId = uuid.v4();
         await txn.insert('sale_return_items', {
           'id': itemId,
@@ -705,6 +1118,56 @@ ORDER BY d.occurred_at DESC LIMIT 500
         },
         where: 'id=?',
         whereArgs: [id],
+      );
+      final returnCashboxId =
+          cashboxId ?? (sale['cashbox_id'] as String?) ?? ctx.defaultCashboxId;
+      final cashAccount =
+          refundedMinor > 0
+              ? await _generalLedger.ensureCashboxAccount(
+                txn,
+                entityId: ctx.entityId,
+                cashboxId: returnCashboxId,
+              )
+              : null;
+      final receivable = await _requiredAccount(txn, ctx.entityId, '130');
+      final returnsAccount = await _requiredAccount(txn, ctx.entityId, '420');
+      final inventoryAccount = await _requiredAccount(txn, ctx.entityId, '120');
+      final costAccount = await _requiredAccount(txn, ctx.entityId, '510');
+      await _generalLedger.postEntryWithAccountIds(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: ctx.financialYearId,
+        sourceType: 'sale_return',
+        sourceId: id,
+        occurredAt: now,
+        note: note,
+        lines: [
+          (accountId: returnsAccount, amountMinor: total, isDebit: true),
+          if (refundedMinor > 0)
+            (
+              accountId: cashAccount!,
+              amountMinor: refundedMinor,
+              isDebit: false,
+            ),
+          if (total - refundedMinor > 0)
+            (
+              accountId: receivable,
+              amountMinor: total - refundedMinor,
+              isDebit: false,
+            ),
+          if (totalReturnedCost > 0)
+            (
+              accountId: inventoryAccount,
+              amountMinor: totalReturnedCost,
+              isDebit: true,
+            ),
+          if (totalReturnedCost > 0)
+            (
+              accountId: costAccount,
+              amountMinor: totalReturnedCost,
+              isDebit: false,
+            ),
+        ],
       );
       await _enqueueDocumentEvent(
         txn,
@@ -906,6 +1369,44 @@ ORDER BY d.occurred_at DESC LIMIT 500
         where: 'id=?',
         whereArgs: [id],
       );
+      final returnCashboxId =
+          cashboxId ??
+          (purchase['cashbox_id'] as String?) ??
+          ctx.defaultCashboxId;
+      final cashAccount =
+          receivedMinor > 0
+              ? await _generalLedger.ensureCashboxAccount(
+                txn,
+                entityId: ctx.entityId,
+                cashboxId: returnCashboxId,
+              )
+              : null;
+      final payableAccount = await _requiredAccount(txn, ctx.entityId, '210');
+      final inventoryAccount = await _requiredAccount(txn, ctx.entityId, '120');
+      await _generalLedger.postEntryWithAccountIds(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: ctx.financialYearId,
+        sourceType: 'purchase_return',
+        sourceId: id,
+        occurredAt: now,
+        note: note,
+        lines: [
+          if (receivedMinor > 0)
+            (
+              accountId: cashAccount!,
+              amountMinor: receivedMinor,
+              isDebit: true,
+            ),
+          if (total - receivedMinor > 0)
+            (
+              accountId: payableAccount,
+              amountMinor: total - receivedMinor,
+              isDebit: true,
+            ),
+          (accountId: inventoryAccount, amountMinor: total, isDebit: false),
+        ],
+      );
       await _enqueueDocumentEvent(
         txn,
         ctx.entityId,
@@ -1044,6 +1545,17 @@ ORDER BY d.occurred_at DESC LIMIT 500
         where: 'id=? AND entity_id=?',
         whereArgs: [documentId, ctx.entityId],
       );
+      await _generalLedger.reverseEntry(
+        txn,
+        entityId: ctx.entityId,
+        financialYearId: document['financial_year_id'] as String,
+        originalSourceType: type,
+        originalSourceId: documentId,
+        reversalSourceType: '${type}_void',
+        reversalSourceId: documentId,
+        occurredAt: now,
+        note: reason,
+      );
       await _outbox.enqueueEvent(
         txn,
         entityId: ctx.entityId,
@@ -1079,19 +1591,53 @@ ORDER BY d.occurred_at DESC LIMIT 500
     };
     final items = await db.rawQuery(
       '''
-SELECT i.*, p.name AS product_name, u.name AS unit_name
+SELECT i.*, p.name AS product_name, u.name AS unit_name, w.name AS warehouse_name
 FROM $itemTable i
 LEFT JOIN inventory_items inv ON inv.id=i.inventory_item_id
 LEFT JOIN products p ON p.id=inv.product_id
 LEFT JOIN product_units u ON u.id=i.product_unit_id
+LEFT JOIN warehouses w ON w.id=inv.warehouse_id
 WHERE i.$fk=?
 ORDER BY i.created_at ASC
 ''',
       [id],
     );
+
+    final partyRows =
+        header['party_id'] == null
+            ? const <Map<String, Object?>>[]
+            : await db.query(
+              'parties',
+              columns: const ['name'],
+              where: 'id=?',
+              whereArgs: [header['party_id']],
+              limit: 1,
+            );
+    final cashboxRows =
+        header['cashbox_id'] == null
+            ? const <Map<String, Object?>>[]
+            : await db.query(
+              'cashboxes',
+              columns: const ['name'],
+              where: 'id=?',
+              whereArgs: [header['cashbox_id']],
+              limit: 1,
+            );
+    final warehouseNames = items
+        .map((item) => item['warehouse_name']?.toString())
+        .whereType<String>()
+        .where((name) => name.trim().isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    final document = AccountingDocument.fromSql(header, type: type).copyWith(
+      partyName: partyRows.isEmpty ? null : partyRows.first['name']?.toString(),
+    );
     return DocumentDetails(
-      header: AccountingDocument.fromSql(header, type: type),
+      header: document,
       items: items.map(DocumentLine.fromSql).toList(growable: false),
+      warehouseName: warehouseNames.isEmpty ? null : warehouseNames.join('، '),
+      cashboxName:
+          cashboxRows.isEmpty ? null : cashboxRows.first['name']?.toString(),
     );
   }
 
@@ -1195,6 +1741,9 @@ ORDER BY i.created_at ASC
       'discountMinor': header['discount_minor'],
       'finalMinor': header['final_minor'],
       'paidMinor': isReturn ? 0 : header['paid_minor'],
+      // v2 currently has no local due-date field.  Null is an explicit valid
+      // contract value and is preferable to silently omitting the key.
+      'dueDate': null,
       'note': header['note'],
       'postedAt': header['posted_at'],
       'items': items
@@ -1204,6 +1753,7 @@ ORDER BY i.created_at ASC
               'inventoryItemId': item['inventory_item_id'],
               'productId': item['product_id'],
               'productUnitId': item['product_unit_id'],
+              'warehouseId': item['warehouse_id'],
               'quantity': item['quantity'],
               'unitFactor':
                   item[isReturn
@@ -1218,6 +1768,12 @@ ORDER BY i.created_at ASC
                   item[isSale ? 'unit_price_minor' : 'unit_cost_minor'],
               'lineDiscountMinor': item['line_discount_minor'] ?? 0,
               'lineTotalMinor': item['line_total_minor'],
+              'netAmountMinor':
+                  type == 'sale'
+                      ? item['net_amount_minor']
+                      : type == 'purchase'
+                      ? item['cost_amount_minor']
+                      : item['line_total_minor'],
               'costAmountMinor':
                   item['cost_amount_minor'] ?? item['line_total_minor'],
               'inventoryMovementId': movementFor(item['id']),
@@ -1359,6 +1915,17 @@ ORDER BY i.created_at ASC
     final wholeScaled = (whole * scale).round();
     if (wholeScaled <= 0) return 0;
     return ((total * partScaled) + (wholeScaled ~/ 2)) ~/ wholeScaled;
+  }
+
+  Future<String> _requiredAccount(
+    DatabaseExecutor db,
+    String entityId,
+    String code,
+  ) async {
+    await _generalLedger.ensureDefaultAccounts(db, entityId);
+    final id = await _generalLedger.accountId(db, entityId, code);
+    if (id == null) throw StateError('الحساب $code غير موجود');
+    return id;
   }
 
   String _number(String prefix, String deviceId, DateTime now) =>

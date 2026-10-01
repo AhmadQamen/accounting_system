@@ -133,6 +133,9 @@ class OutboxService {
         'name',
         'minQuantity',
         'active',
+        'itemType',
+        'location',
+        'costPriceMinor',
         'updatedAt',
       },
       'ProductUpdated': {
@@ -141,6 +144,9 @@ class OutboxService {
         'name',
         'minQuantity',
         'active',
+        'itemType',
+        'location',
+        'costPriceMinor',
         'updatedAt',
       },
       'ProductDeleted': {'id', 'deletedAt'},
@@ -345,6 +351,64 @@ class OutboxService {
             eventType == 'ProductUnitUpdated') &&
         (payload['salePriceMinor'] as int) < 0) {
       throw ArgumentError('salePriceMinor must be non-negative');
+    }
+    if (eventType == 'ProductCreated' || eventType == 'ProductUpdated') {
+      const itemTypes = {'STOCKED', 'NON_STOCKED'};
+      if (!itemTypes.contains(payload['itemType'])) {
+        throw ArgumentError(
+          'itemType must be STOCKED or NON_STOCKED for $eventType',
+        );
+      }
+    }
+    if (const {
+      'SalePosted',
+      'PurchasePosted',
+      'SaleReturnPosted',
+      'PurchaseReturnPosted',
+    }.contains(eventType)) {
+      final items = payload['items'];
+      if (items is! List || items.isEmpty) {
+        throw ArgumentError('$eventType requires at least one item');
+      }
+      var netTotal = 0;
+      for (final raw in items) {
+        if (raw is! Map) {
+          throw ArgumentError('$eventType items must be JSON objects');
+        }
+        final item = raw.cast<Object?, Object?>();
+        for (final key in const [
+          'itemId',
+          'productId',
+          'productUnitId',
+          'warehouseId',
+        ]) {
+          final value = item[key];
+          if (value is! String || value.trim().isEmpty) {
+            throw ArgumentError('$eventType item requires valid $key');
+          }
+        }
+        for (final key in const ['unitFactor', 'baseQuantity']) {
+          final value = item[key];
+          if (value is! num || !value.isFinite || value <= 0) {
+            throw ArgumentError('$eventType item requires positive $key');
+          }
+        }
+        for (final key in const ['netAmountMinor', 'costAmountMinor']) {
+          final value = item[key];
+          if (value is! int || value < 0) {
+            throw ArgumentError(
+              '$eventType item requires non-negative integer $key',
+            );
+          }
+        }
+        netTotal += item['netAmountMinor'] as int;
+      }
+      if (netTotal != payload['finalMinor']) {
+        throw ArgumentError(
+          '$eventType item net total ($netTotal) must equal finalMinor '
+          '(${payload['finalMinor']})',
+        );
+      }
     }
   }
 }

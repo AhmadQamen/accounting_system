@@ -171,6 +171,9 @@ class SqliteDomainEventProjector implements DomainEventProjector {
         'category_id': e.payload['categoryId'],
         'name': _s(e, 'name'),
         'min_quantity': _n(e, 'minQuantity'),
+        'item_type': (e.payload['itemType']?.toString().toLowerCase() ?? 'stocked').replaceAll('_', '_'),
+        'location': e.payload['location'],
+        'cost_price_minor': _optionalNonNegativeInt(e, 'costPriceMinor', historicalDefault: 0),
         'updated_at': _s(e, 'updatedAt'),
         'deleted_at': null,
       };
@@ -196,6 +199,21 @@ class SqliteDomainEventProjector implements DomainEventProjector {
         'updated_at': _s(e, 'createdAt'),
         'deleted_at': null,
       };
+    }
+    if (table == 'product_units' && values['is_primary'] == 1) {
+      // Event delivery may be retried or an older backend may return the
+      // promotion before the explicit demotion event. Keep the invariant in
+      // the same pull transaction so replay cannot violate the unique index.
+      await db.update(
+        'product_units',
+        {
+          'is_primary': 0,
+          'updated_at': values['updated_at'],
+        },
+        where:
+            'entity_id=? AND product_id=? AND id<>? AND is_primary=1 AND deleted_at IS NULL',
+        whereArgs: [entity, values['product_id'], e.aggregateId],
+      );
     }
     await _upsert(db, table, e.aggregateId, {
       'entity_id': entity,
@@ -570,15 +588,42 @@ class SqliteDomainEventProjector implements DomainEventProjector {
               'purchase_return': 'purchase_return_invoice_id',
             }[type]!;
     for (final x in _items(e)) {
-      final item = _ms(x, 'itemId'), inv = _ms(x, 'inventoryItemId');
+      final item = _ms(x, 'itemId');
+      final itemWarehouse =
+          x['warehouseId']?.toString().trim().isNotEmpty == true
+              ? x['warehouseId'].toString()
+              : wh;
+      final productId = _ms(x, 'productId');
+      final inv = x['inventoryItemId']?.toString().trim().isNotEmpty == true
+          ? x['inventoryItemId'].toString()
+          : await _inventoryFor(
+              db,
+              entity,
+              productId,
+              itemWarehouse,
+              e.occurredAt,
+            );
       await _inventoryItem(
         db,
         entity,
         inv,
-        _ms(x, 'productId'),
-        wh,
+        productId,
+        itemWarehouse,
         e.occurredAt,
       );
+      final baseQuantity = _mn(x, 'baseQuantity');
+      final factor = _mn(x, 'unitFactor');
+      final quantity = x['quantity'] is num
+          ? (x['quantity'] as num).toDouble()
+          : baseQuantity / factor;
+      final netAmount = x['netAmountMinor'] is int
+          ? x['netAmountMinor'] as int
+          : _mi(x, 'lineTotalMinor');
+      final unitAmount = x['unitAmountMinor'] is int
+          ? x['unitAmountMinor'] as int
+          : quantity == 0
+          ? 0
+          : (netAmount / quantity).round();
       final unitFactor =
           type == 'sale'
               ? 'unit_factor_at_sale'
@@ -593,18 +638,19 @@ class SqliteDomainEventProjector implements DomainEventProjector {
           'purchase_item_id': x['originalPurchaseItemId'],
         'inventory_item_id': inv,
         'product_unit_id': _ms(x, 'productUnitId'),
-        'quantity': _mn(x, 'quantity'),
-        unitFactor: _mn(x, 'unitFactor'),
-        'base_quantity': _mn(x, 'baseQuantity'),
-        type.startsWith('sale') ? 'unit_price_minor' : 'unit_cost_minor': _mi(
-          x,
-          'unitAmountMinor',
-        ),
-        if (!isReturn) 'line_discount_minor': _mi(x, 'lineDiscountMinor'),
-        'line_total_minor': _mi(x, 'lineTotalMinor'),
+        'quantity': quantity,
+        unitFactor: factor,
+        'base_quantity': baseQuantity,
+        type.startsWith('sale') ? 'unit_price_minor' : 'unit_cost_minor':
+            unitAmount,
+        if (!isReturn)
+          'line_discount_minor': x['lineDiscountMinor'] is int
+              ? x['lineDiscountMinor'] as int
+              : 0,
+        'line_total_minor': netAmount,
         if (type != 'purchase_return')
           'cost_amount_minor': _mi(x, 'costAmountMinor'),
-        if (type == 'sale') 'net_amount_minor': _mi(x, 'lineTotalMinor'),
+        if (type == 'sale') 'net_amount_minor': netAmount,
         'created_at': e.occurredAt,
         if (!isReturn) 'updated_at': e.occurredAt,
         if (!isReturn) 'version': 1,
@@ -617,7 +663,10 @@ class SqliteDomainEventProjector implements DomainEventProjector {
       await _inventoryMove(
         db,
         entity: entity,
-        id: _ms(x, 'inventoryMovementId'),
+        id:
+            x['inventoryMovementId']?.toString().trim().isNotEmpty == true
+                ? x['inventoryMovementId'].toString()
+                : '${e.eventId}:inventory:$item',
         year: year,
         inventory: inv,
         type: mt,

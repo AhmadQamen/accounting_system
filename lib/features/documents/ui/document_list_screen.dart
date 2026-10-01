@@ -1,4 +1,5 @@
 import 'package:accounting_system/core/domain/money.dart';
+import 'package:accounting_system/core/currency/currency.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
@@ -6,6 +7,7 @@ import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
 import 'package:accounting_system/features/documents/models/document_models.dart';
+import 'package:accounting_system/features/documents/data/document_repository.dart';
 import 'package:accounting_system/features/documents/ui/new_document_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -136,11 +138,10 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final narrow = constraints.maxWidth < 720;
+                        final columns = constraints.maxWidth < 720 ? 2 : 3;
                         final width =
-                            narrow
-                                ? constraints.maxWidth
-                                : (constraints.maxWidth - 24) / 3;
+                            (constraints.maxWidth - ((columns - 1) * 12)) /
+                            columns;
                         final stats = [
                           (
                             'إجمالي السجل',
@@ -312,6 +313,11 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
         .documentDetails(widget.kind.dbType, documentId);
     if (!context.mounted) return;
 
+    // Opening a modal directly while desktop Flutter is finalising the pointer
+    // update can re-enter MouseTracker. Present it on the next frame instead.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!context.mounted) return;
+
     final header = details.header;
     final shouldPost =
         header.isDraft &&
@@ -321,73 +327,49 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
       context: context,
       builder:
           (dialogContext) => AlertDialog(
-            title: Text('${widget.kind.label} • ${header.displayNumber}'),
-            content: SizedBox(
-              width: responsiveDialogWidth(context, 720),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        StatusPill(
-                          label: _statusLabel(header.status),
-                          color:
-                              header.isPosted
-                                  ? context.colors.success
-                                  : header.isVoid
-                                  ? context.colors.error
-                                  : context.colors.warning,
+            titlePadding: const EdgeInsetsDirectional.fromSTEB(22, 20, 14, 8),
+            contentPadding: const EdgeInsetsDirectional.fromSTEB(22, 8, 22, 8),
+            actionsPadding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 16),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${widget.kind.label} • ${header.displayNumber}',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'تفاصيل البيع والكلفة والبنود',
+                        style: TextStyle(
+                          color: context.colors.textDim,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
                         ),
-                        if (header.partyName != null)
-                          StatusPill(
-                            label: header.partyName!,
-                            color: context.colors.info,
-                            icon: Icons.person_outline_rounded,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    for (var i = 0; i < details.items.length; i++) ...[
-                      _DetailLine(line: details.items[i], currency: currency),
-                      if (i != details.items.length - 1)
-                        const Divider(height: 1),
+                      ),
                     ],
-                    const SizedBox(height: 12),
-                    const Divider(),
-                    _DetailAmount(
-                      label: 'الإجمالي',
-                      value: header.displayTotalMinor,
-                      currency: currency,
-                      emphasized: true,
-                    ),
-                    if (header.discountMinor > 0)
-                      _DetailAmount(
-                        label: 'الخصم',
-                        value: header.discountMinor,
-                        currency: currency,
-                      ),
-                    if (header.paidMinor > 0)
-                      _DetailAmount(
-                        label: 'المدفوع/المقبوض',
-                        value: header.paidMinor,
-                        currency: currency,
-                      ),
-                    if (header.refundedMinor > 0)
-                      _DetailAmount(
-                        label: 'المبلغ النقدي المرتجع',
-                        value: header.refundedMinor,
-                        currency: currency,
-                      ),
-                    if (header.note?.trim().isNotEmpty == true) ...[
-                      const Divider(),
-                      Text('ملاحظات: ${header.note}'),
-                    ],
-                  ],
+                  ),
                 ),
+                StatusPill(
+                  label: _statusLabel(header.status),
+                  color:
+                      header.isPosted
+                          ? context.colors.success
+                          : header.isVoid
+                          ? context.colors.error
+                          : context.colors.warning,
+                  compact: true,
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: responsiveDialogWidth(context, 1040),
+              child: _InvoiceDetailsPanel(
+                details: details,
+                currency: currency,
+                documentKind: widget.kind,
               ),
             ),
             actions: [
@@ -405,13 +387,58 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
     );
 
     if (action != 'post' || !context.mounted) return;
+    final repository = ref.read(documentRepositoryProvider);
+    var shortages = const <SaleStockShortage>[];
+    if (widget.kind == DocumentKind.sale) {
+      try {
+        shortages = await repository.saleDraftStockShortages(documentId);
+      } catch (error) {
+        if (context.mounted) {
+          CustomSnackBar.showErrorSnackbar(
+            'تعذر التحقق من رصيد المخزون: $error',
+          );
+        }
+        return;
+      }
+      if (!context.mounted) return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder:
           (dialogContext) => AlertDialog(
-            title: const Text('تأكيد الاعتماد'),
-            content: const Text(
-              'سيتم إنشاء حركات المخزون والصندوق والذمم محلياً. هل تريد المتابعة؟',
+            title: Text(
+              shortages.isEmpty ? 'تأكيد الاعتماد' : 'تنبيه: مخزون غير كافٍ',
+            ),
+            content: SizedBox(
+              width: shortages.isEmpty ? 360 : 460,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    shortages.isEmpty
+                        ? 'سيتم إنشاء حركات المخزون والصندوق والذمم محلياً. هل تريد المتابعة؟'
+                        : 'اعتماد هذه الفاتورة سيجعل رصيد المواد التالية سالبًا:',
+                  ),
+                  if (shortages.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    for (final shortage in shortages)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          '• ${shortage.productName}: المتاح '
+                          '${shortage.availableBaseQuantity.toStringAsFixed(2)}، '
+                          'المطلوب ${shortage.requestedBaseQuantity.toStringAsFixed(2)}، '
+                          'الرصيد الجديد ${shortage.resultingBaseQuantity.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: context.colors.warning,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -420,7 +447,7 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('اعتماد'),
+                child: Text(shortages.isEmpty ? 'اعتماد' : 'بيع رغم النقص'),
               ),
             ],
           ),
@@ -429,9 +456,12 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
 
     try {
       if (widget.kind == DocumentKind.sale) {
-        await ref.read(documentRepositoryProvider).postSale(documentId);
+        await repository.postSale(
+          documentId,
+          allowNegativeStock: shortages.isNotEmpty,
+        );
       } else if (widget.kind == DocumentKind.purchase) {
-        await ref.read(documentRepositoryProvider).postPurchase(documentId);
+        await repository.postPurchase(documentId);
       }
       ref.read(dataRevisionProvider.notifier).state++;
       if (context.mounted) {
@@ -713,110 +743,664 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
           : value.toStringAsFixed(2);
 }
 
-class _DetailLine extends StatelessWidget {
-  const _DetailLine({required this.line, required this.currency});
+class _InvoiceDetailsPanel extends StatelessWidget {
+  const _InvoiceDetailsPanel({
+    required this.details,
+    required this.currency,
+    required this.documentKind,
+  });
 
-  final DocumentLine line;
+  final DocumentDetails details;
   final String currency;
+  final DocumentKind documentKind;
+
+  String _date(DateTime? value) {
+    if (value == null) return 'غير محدد';
+    final local = value.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)}/${local.year} • ${two(local.hour)}:${two(local.minute)}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final amount =
-        line.lineTotalMinor != 0 ? line.lineTotalMinor : line.costAmountMinor;
-    final amountText = Money(amount).format(
-      locale: Localizations.localeOf(context).toString(),
-      currencyCode: currency,
-    );
-    final quantity =
-        line.quantity.truncateToDouble() == line.quantity
-            ? line.quantity.toStringAsFixed(0)
-            : line.quantity.toStringAsFixed(2);
+    final header = details.header;
+    final colors = context.colors;
+    final saleLabel = switch (documentKind) {
+      DocumentKind.purchase => 'إجمالي الشراء',
+      DocumentKind.saleReturn => 'قيمة المرتجع',
+      DocumentKind.purchaseReturn => 'قيمة المرتجع',
+      DocumentKind.waste => 'قيمة التالف',
+      _ => 'إجمالي البيع',
+    };
+    final margin = header.finalMinor - header.totalCostMinor;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final info = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                line.productName ?? 'منتج',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '$quantity ${line.unitName ?? ''}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: context.colors.textDim, fontSize: 11),
-              ),
-            ],
-          );
-          final amountWidget = Text(
-            amountText,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          );
-          if (constraints.maxWidth < 420) {
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: SingleChildScrollView(
+        primary: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 620;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [info, const SizedBox(height: 5), amountWidget],
+              children: [
+                GridView.count(
+                  crossAxisCount: compact ? 2 : 4,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: compact ? 2.35 : 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _DocumentInfoChip(
+                      icon: Icons.warehouse_outlined,
+                      label: 'المستودع',
+                      value: details.warehouseName ?? 'غير محدد',
+                    ),
+                    _DocumentInfoChip(
+                      icon: Icons.calendar_today_outlined,
+                      label: 'التاريخ',
+                      value: _date(header.postedAt ?? header.occurredAt),
+                    ),
+                    _DocumentInfoChip(
+                      icon: Icons.person_outline_rounded,
+                      label: 'الطرف',
+                      value: header.partyName ?? 'بيع نقدي',
+                    ),
+                    _DocumentInfoChip(
+                      icon: Icons.account_balance_wallet_outlined,
+                      label: 'الصندوق',
+                      value: details.cashboxName ?? 'غير محدد',
+                    ),
+                  ],
+                ),
+                if (header.currencyCode != null &&
+                    header.currencyCode != currency &&
+                    header.foreignFinalMinor != null) ...[
+                  const SizedBox(height: 9),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.primary.withValues(alpha: .08),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(
+                        color: colors.primary.withValues(alpha: .18),
+                      ),
+                    ),
+                    child: Text(
+                      'عملة الفاتورة: ${Money(header.foreignFinalMinor!).format(locale: Localizations.localeOf(context).toString(), currencyCode: header.currencyCode!)}'
+                      ' • المقابل المثبت: ${_money(context, header.finalMinor)}'
+                      ' • السعر ${CurrencyMath.formatRateMicros(header.exchangeRateMicros)}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                Text(
+                  'ملخص الفاتورة',
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                GridView.count(
+                  crossAxisCount: compact ? 2 : 4,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: compact ? 2.25 : 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _DocumentSummaryCard(
+                      label: saleLabel,
+                      value: header.displayTotalMinor,
+                      currency: currency,
+                      color: colors.primary,
+                      icon: Icons.receipt_long_outlined,
+                    ),
+                    _DocumentSummaryCard(
+                      label: 'إجمالي الكلفة',
+                      value: header.totalCostMinor,
+                      currency: currency,
+                      color: colors.warning,
+                      icon: Icons.inventory_2_outlined,
+                    ),
+                    _DocumentSummaryCard(
+                      label: 'الهامش',
+                      value: margin,
+                      currency: currency,
+                      color: margin >= 0 ? colors.success : colors.error,
+                      icon: Icons.insights_outlined,
+                    ),
+                    _DocumentSummaryCard(
+                      label: 'المدفوع / المقبوض',
+                      value: header.paidMinor,
+                      currency: currency,
+                      color: colors.info,
+                      icon: Icons.payments_outlined,
+                    ),
+                  ],
+                ),
+                if (header.discountMinor > 0 || header.refundedMinor > 0) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (header.discountMinor > 0)
+                        StatusPill(
+                          label: 'خصم ${_money(context, header.discountMinor)}',
+                          color: colors.warning,
+                          compact: true,
+                        ),
+                      if (header.refundedMinor > 0)
+                        StatusPill(
+                          label:
+                              'مرتجع نقدي ${_money(context, header.refundedMinor)}',
+                          color: colors.error,
+                          compact: true,
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'بنود الفاتورة',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${details.items.length} بند',
+                      style: TextStyle(color: colors.textDim, fontSize: 11),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                if (details.items.isEmpty)
+                  _EmptyInvoiceItems()
+                else if (compact)
+                  ...details.items.map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _InvoiceItemCard(line: line, currency: currency),
+                    ),
+                  )
+                else
+                  _InvoiceItemsTable(items: details.items, currency: currency),
+                if (header.note?.trim().isNotEmpty == true) ...[
+                  const SizedBox(height: 14),
+                  _InvoiceNote(note: header.note!),
+                ],
+              ],
             );
-          }
-          return Row(
-            children: [
-              Expanded(child: info),
-              const SizedBox(width: 10),
-              Flexible(child: amountWidget),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }
+
+  String _money(BuildContext context, int value) => Money(value).format(
+    locale: Localizations.localeOf(context).toString(),
+    currencyCode: currency,
+  );
 }
 
-class _DetailAmount extends StatelessWidget {
-  const _DetailAmount({
+class _DocumentInfoChip extends StatelessWidget {
+  const _DocumentInfoChip({
+    required this.icon,
     required this.label,
     required this.value,
-    required this.currency,
-    this.emphasized = false,
   });
 
+  final IconData icon;
   final String label;
-  final int value;
-  final String currency;
-  final bool emphasized;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: .42),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: colors.primary.withValues(alpha: .20)),
+      ),
       child: Row(
         children: [
-          Expanded(child: Text(label)),
-          Flexible(
-            child: Text(
-              Money(value).format(
-                locale: Localizations.localeOf(context).toString(),
-                currencyCode: currency,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: emphasized ? FontWeight.w900 : FontWeight.w700,
-                color: emphasized ? context.colors.primary : null,
-              ),
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: colors.primary.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, size: 15, color: colors.primary),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(color: colors.textDim, fontSize: 9),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _DocumentSummaryCard extends StatelessWidget {
+  const _DocumentSummaryCard({
+    required this.label,
+    required this.value,
+    required this.currency,
+    required this.color,
+    required this.icon,
+  });
+  final String label;
+  final int value;
+  final String currency;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: .075),
+      borderRadius: BorderRadius.circular(11),
+      border: Border.all(color: color.withValues(alpha: .20)),
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(icon, color: color, size: 15),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: context.colors.textDim, fontSize: 9),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                Money(value).format(
+                  locale: Localizations.localeOf(context).toString(),
+                  currencyCode: currency,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.colors.textPrimary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InvoiceItemsTable extends StatelessWidget {
+  const _InvoiceItemsTable({required this.items, required this.currency});
+  final List<DocumentLine> items;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.colors.surface.withValues(alpha: .46),
+      border: Border.all(color: context.colors.border),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(
+      children: [
+        const _InvoiceTableHeader(),
+        for (var index = 0; index < items.length; index++) ...[
+          _InvoiceTableLine(line: items[index], currency: currency),
+          if (index != items.length - 1)
+            Divider(height: 1, color: context.colors.border),
+        ],
+      ],
+    ),
+  );
+}
+
+class _InvoiceTableHeader extends StatelessWidget {
+  const _InvoiceTableHeader();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: context.colors.primary.withValues(alpha: .09),
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+    ),
+    child: const Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(
+            'البند',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            'الكمية',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            'سعر البيع',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            'الكلفة',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            'الإجمالي',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InvoiceTableLine extends StatelessWidget {
+  const _InvoiceTableLine({required this.line, required this.currency});
+  final DocumentLine line;
+  final String currency;
+
+  String _quantity(double value) =>
+      value.truncateToDouble() == value
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(2);
+  String _money(BuildContext context, int value) => Money(value).format(
+    locale: Localizations.localeOf(context).toString(),
+    currencyCode: currency,
+  );
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+    child: Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                line.productName ?? 'منتج',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                line.unitName ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: context.colors.textDim),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Text(
+            '${_quantity(line.quantity)} ${line.unitName ?? ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            _money(context, line.unitPriceMinor),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: context.colors.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            _money(context, line.unitCostMinor),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: context.colors.warning,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            _money(
+              context,
+              line.lineTotalMinor != 0
+                  ? line.lineTotalMinor
+                  : line.costAmountMinor,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InvoiceItemCard extends StatelessWidget {
+  const _InvoiceItemCard({required this.line, required this.currency});
+  final DocumentLine line;
+  final String currency;
+
+  String _money(BuildContext context, int value) => Money(value).format(
+    locale: Localizations.localeOf(context).toString(),
+    currencyCode: currency,
+  );
+  String _quantity(double value) =>
+      value.truncateToDouble() == value
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(2);
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(13),
+    decoration: BoxDecoration(
+      color: context.colors.surface.withValues(alpha: .58),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: context.colors.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          line.productName ?? 'منتج',
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          '${_quantity(line.quantity)} ${line.unitName ?? ''}',
+          style: TextStyle(color: context.colors.textDim, fontSize: 11),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _ItemMetric(
+                label: 'سعر البيع',
+                value: _money(context, line.unitPriceMinor),
+                color: context.colors.primary,
+              ),
+            ),
+            Expanded(
+              child: _ItemMetric(
+                label: 'الكلفة',
+                value: _money(context, line.unitCostMinor),
+                color: context.colors.warning,
+              ),
+            ),
+            Expanded(
+              child: _ItemMetric(
+                label: 'الإجمالي',
+                value: _money(
+                  context,
+                  line.lineTotalMinor != 0
+                      ? line.lineTotalMinor
+                      : line.costAmountMinor,
+                ),
+                color: context.colors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _ItemMetric extends StatelessWidget {
+  const _ItemMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  final String label;
+  final String value;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: TextStyle(color: context.colors.textDim, fontSize: 9)),
+      const SizedBox(height: 2),
+      Text(
+        value,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ],
+  );
+}
+
+class _EmptyInvoiceItems extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 34),
+    decoration: BoxDecoration(
+      color: context.colors.surface.withValues(alpha: .45),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: context.colors.border),
+    ),
+    child: Column(
+      children: [
+        Icon(Icons.inventory_2_outlined, color: context.colors.textDim),
+        const SizedBox(height: 8),
+        Text(
+          'لا توجد بنود في هذه الفاتورة',
+          style: TextStyle(color: context.colors.textDim, fontSize: 12),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InvoiceNote extends StatelessWidget {
+  const _InvoiceNote({required this.note});
+  final String note;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: context.colors.info.withValues(alpha: .08),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: context.colors.info.withValues(alpha: .22)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.notes_rounded, size: 18, color: context.colors.info),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            note,
+            style: TextStyle(color: context.colors.textPrimary, fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _DocumentRow extends StatelessWidget {

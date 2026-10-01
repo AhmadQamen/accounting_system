@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS $table (
         shortcut.toJson(),
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+      // Databases created before key_id existed keep their original labels;
+      // only supply the missing physical key identifier.
+      await db.update(
+        table,
+        {'key_id': shortcut.key.keyId},
+        where: 'action = ? AND key_id = 0',
+        whereArgs: [shortcut.action.name],
+      );
     }
   }
 

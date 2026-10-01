@@ -22,11 +22,21 @@ class AppLogoIcon extends StatelessWidget {
       padding: const EdgeInsets.all(12.0),
       child: Image.asset(
         ImageAssets.logo,
-        color: colored
-            ? null
-            : color ?? theme.colorScheme.onSurface.withValues(alpha: 0.8),
+        color:
+            colored
+                ? null
+                : color ?? theme.colorScheme.onSurface.withValues(alpha: 0.8),
         width: width,
         height: height,
+        errorBuilder:
+            (context, error, stackTrace) => SizedBox(
+              width: width,
+              height: height,
+              child: Icon(
+                Icons.account_balance_wallet_outlined,
+                color: color ?? theme.colorScheme.primary,
+              ),
+            ),
       ),
     );
   }

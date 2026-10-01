@@ -141,12 +141,18 @@ void main() {
       ),
     ];
 
-    await fixture.engine.syncNow();
+    await expectLater(
+      fixture.engine.syncNow(),
+      throwsA(isA<IncompleteSyncException>()),
+    );
     final rows = await fixture.db.query('sync_outbox', orderBy: 'event_id');
     expect(rows.map((row) => row['event_id']), ['conflict', 'rejected']);
     expect(rows.map((row) => row['status']), ['conflict', 'rejected']);
     expect(await fixture.db.query('sync_conflicts'), hasLength(1));
     expect(await fixture.db.query('sync_operations'), hasLength(4));
+    final state = (await fixture.db.query('sync_entity_state')).single;
+    expect(state['last_sync_at'], isNull);
+    expect(state['last_error'], contains('لم تكتمل المزامنة'));
   });
 
   test('partial bootstrap replays history from zero and runs once', () async {
@@ -427,6 +433,216 @@ void main() {
   });
 
   test(
+    'primary unit promotion demotes the old primary even when it arrives first',
+    () async {
+      final fixture = await _fixture();
+      addTearDown(fixture.db.close);
+      const at = '2026-01-01T00:00:00Z';
+      fixture.transport.pullBatches.add(
+        SyncPullBatch(
+          events: [
+            _pulledProduct('promotion-product', 1),
+            DomainEvent(
+              eventId: 'primary-a-created',
+              aggregateType: 'product_unit',
+              aggregateId: 'unit-a',
+              eventType: 'ProductUnitCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 2,
+              payload: const {
+                'id': 'unit-a',
+                'productId': 'promotion-product',
+                'name': 'A',
+                'factor': 1.0,
+                'primary': true,
+                'salePriceMinor': 100,
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'unit-b-created',
+              aggregateType: 'product_unit',
+              aggregateId: 'unit-b',
+              eventType: 'ProductUnitCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 3,
+              payload: const {
+                'id': 'unit-b',
+                'productId': 'promotion-product',
+                'name': 'B',
+                'factor': 2.0,
+                'primary': false,
+                'salePriceMinor': 200,
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'unit-b-promoted',
+              aggregateType: 'product_unit',
+              aggregateId: 'unit-b',
+              eventType: 'ProductUnitUpdated',
+              aggregateVersion: 2,
+              occurredAt: at,
+              serverSequence: 4,
+              payload: const {
+                'id': 'unit-b',
+                'productId': 'promotion-product',
+                'name': 'B',
+                'factor': 1.0,
+                'primary': true,
+                'salePriceMinor': 200,
+                'updatedAt': at,
+              },
+            ),
+          ],
+          lastServerSequence: 4,
+          hasMore: false,
+        ),
+      );
+
+      await fixture.engine.syncNow();
+
+      final units = await fixture.db.query(
+        'product_units',
+        where: 'product_id=?',
+        whereArgs: ['promotion-product'],
+        orderBy: 'id',
+      );
+      expect(units.map((row) => row['is_primary']), [0, 1]);
+    },
+  );
+
+  test(
+    'second device rebuilds product, category, unit price and barcode',
+    () async {
+      final fixture = await _fixture();
+      addTearDown(fixture.db.close);
+      const at = '2026-09-26T12:00:00Z';
+      fixture.transport.pullBatches.add(
+        SyncPullBatch(
+          events: [
+            DomainEvent(
+              eventId: 'category-event',
+              aggregateType: 'category',
+              aggregateId: 'category-1',
+              eventType: 'CategoryCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 1,
+              payload: const {
+                'id': 'category-1',
+                'name': 'Food',
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'product-create',
+              aggregateType: 'product',
+              aggregateId: 'product-1',
+              eventType: 'ProductCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 2,
+              payload: const {
+                'id': 'product-1',
+                'categoryId': 'category-1',
+                'name': 'Rice',
+                'minQuantity': 5.0,
+                'active': true,
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'unit-create',
+              aggregateType: 'product_unit',
+              aggregateId: 'unit-1',
+              eventType: 'ProductUnitCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 3,
+              payload: const {
+                'id': 'unit-1',
+                'productId': 'product-1',
+                'name': 'Bag',
+                'factor': 1.0,
+                'primary': true,
+                'salePriceMinor': 125000,
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'barcode-create',
+              aggregateType: 'barcode',
+              aggregateId: 'barcode-1',
+              eventType: 'BarcodeCreated',
+              aggregateVersion: 1,
+              occurredAt: at,
+              serverSequence: 4,
+              payload: const {
+                'id': 'barcode-1',
+                'productUnitId': 'unit-1',
+                'code': '6281234567890',
+                'createdAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'product-update',
+              aggregateType: 'product',
+              aggregateId: 'product-1',
+              eventType: 'ProductUpdated',
+              aggregateVersion: 2,
+              occurredAt: at,
+              serverSequence: 5,
+              payload: const {
+                'id': 'product-1',
+                'categoryId': 'category-1',
+                'name': 'Premium Rice',
+                'minQuantity': 12.5,
+                'active': true,
+                'updatedAt': at,
+              },
+            ),
+            DomainEvent(
+              eventId: 'unit-update',
+              aggregateType: 'product_unit',
+              aggregateId: 'unit-1',
+              eventType: 'ProductUnitUpdated',
+              aggregateVersion: 2,
+              occurredAt: at,
+              serverSequence: 6,
+              payload: const {
+                'id': 'unit-1',
+                'productId': 'product-1',
+                'name': 'Bag',
+                'factor': 1.0,
+                'primary': true,
+                'salePriceMinor': 150000,
+                'updatedAt': at,
+              },
+            ),
+          ],
+          lastServerSequence: 6,
+          hasMore: false,
+        ),
+      );
+
+      await fixture.engine.syncNow();
+
+      final product = (await fixture.db.query('products')).single;
+      final unit = (await fixture.db.query('product_units')).single;
+      final barcode = (await fixture.db.query('barcodes')).single;
+      expect(product['name'], 'Premium Rice');
+      expect(product['category_id'], 'category-1');
+      expect(product['min_quantity'], 12.5);
+      expect(unit['sale_price_minor'], 150000);
+      expect(unit['is_primary'], 1);
+      expect(barcode['code'], '6281234567890');
+    },
+  );
+
+  test(
     'second device builds sale, payment and reversal ledgers once',
     () async {
       final fixture = await _fixture();
@@ -600,6 +816,9 @@ List<DomainEvent> _secondDeviceEvents() {
       'name': 'Product',
       'minQuantity': 0.0,
       'active': true,
+      'itemType': 'STOCKED',
+      'location': null,
+      'costPriceMinor': 100,
       'updatedAt': at,
     }),
     event(5, 'ev-unit', 'product_unit', 'unit-1', 'ProductUnitCreated', {
@@ -647,6 +866,7 @@ List<DomainEvent> _secondDeviceEvents() {
       'discountMinor': 0,
       'finalMinor': 500,
       'paidMinor': 300,
+      'dueDate': null,
       'note': null,
       'postedAt': at,
       'cashTransactionId': 'cash-sale',
@@ -657,12 +877,14 @@ List<DomainEvent> _secondDeviceEvents() {
           'inventoryItemId': 'inventory-1',
           'productId': 'product-1',
           'productUnitId': 'unit-1',
+          'warehouseId': 'warehouse-remote',
           'quantity': 2.0,
           'unitFactor': 1.0,
           'baseQuantity': 2.0,
           'unitAmountMinor': 250,
           'lineDiscountMinor': 0,
           'lineTotalMinor': 500,
+          'netAmountMinor': 500,
           'costAmountMinor': 200,
           'inventoryMovementId': 'movement-sale',
         },

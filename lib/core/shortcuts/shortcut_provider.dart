@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'keyboard_shortcut_service.dart';
 import 'shortcut_executor.dart';
 import 'shortcut_notifier.dart';
+import 'invoice_shortcut_macro_notifier.dart';
+
+final invoiceShortcutMacroProvider = ChangeNotifierProvider<InvoiceShortcutMacroNotifier>((ref) => InvoiceShortcutMacroNotifier());
 
 final keyboardShortcutServiceProvider = Provider<KeyboardShortcutService>((
   ref,

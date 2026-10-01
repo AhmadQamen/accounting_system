@@ -1,18 +1,81 @@
+import 'dart:async';
+
 import 'package:accounting_system/core/domain/money.dart';
+import 'package:accounting_system/core/currency/currency.dart';
+import 'package:accounting_system/core/navigation/app_navigation.dart';
+import 'package:accounting_system/core/navigation/app_route.dart';
 import 'package:accounting_system/core/providers/accounting_providers.dart';
 import 'package:accounting_system/core/theme/theme_extension.dart';
 import 'package:accounting_system/core/utils/messges/custom_snackbar.dart';
 import 'package:accounting_system/core/ui/components/blur_appbar.dart';
 import 'package:accounting_system/core/ui/components/my_scaffold.dart';
 import 'package:accounting_system/core/ui/components/premium_ui.dart';
+import 'package:accounting_system/core/keyboard/keyboard_context.dart';
+import 'package:accounting_system/core/keyboard/keyboard_action.dart';
+import 'package:accounting_system/core/keyboard/keyboard_manager.dart';
+import 'package:accounting_system/core/keyboard/keyboard_provider.dart';
+import 'package:accounting_system/core/shortcuts/invoice_shortcut_macro_notifier.dart';
+import 'package:accounting_system/core/shortcuts/shortcut_provider.dart';
 import 'package:accounting_system/features/cash/models/cash_models.dart';
 import 'package:accounting_system/features/documents/models/document_models.dart';
+import 'package:accounting_system/features/documents/data/document_repository.dart';
 import 'package:accounting_system/features/master_data/models/master_data_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
 
 enum DocumentKind { sale, purchase, saleReturn, purchaseReturn, waste }
+
+/// Opens the document workspace over the current page. Keeping creation in a
+/// dialog preserves the caller's navigation stack (especially on mobile).
+Future<void> showNewDocumentDialog(
+  BuildContext context, {
+  required DocumentKind kind,
+  Future<void> Function(BuildContext context)? onExpenseRequested,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      final size = MediaQuery.sizeOf(dialogContext);
+      final fullScreen = size.width < 700 || size.height < 620;
+      return Dialog(
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: fullScreen ? 0 : 24,
+          vertical: fullScreen ? 0 : 24,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          width: fullScreen ? size.width : 1180,
+          height: fullScreen ? size.height : size.height * .88,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: NewDocumentScreen(
+                  kind: kind,
+                  embedded: true,
+                  onExpenseRequested: onExpenseRequested,
+                ),
+              ),
+              PositionedDirectional(
+                top: 8,
+                end: 8,
+                child: Material(
+                  color: Colors.transparent,
+                  child: IconButton.filledTonal(
+                    tooltip: 'إغلاق',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
 
 extension DocumentKindX on DocumentKind {
   String get dbType => switch (this) {
@@ -33,9 +96,16 @@ extension DocumentKindX on DocumentKind {
 }
 
 class NewDocumentScreen extends StatefulWidget {
-  const NewDocumentScreen({super.key, required this.kind});
+  const NewDocumentScreen({
+    super.key,
+    required this.kind,
+    this.embedded = false,
+    this.onExpenseRequested,
+  });
 
   final DocumentKind kind;
+  final bool embedded;
+  final Future<void> Function(BuildContext context)? onExpenseRequested;
 
   @override
   State<NewDocumentScreen> createState() => _NewDocumentScreenState();
@@ -52,14 +122,26 @@ class _NewDocumentScreenState extends State<NewDocumentScreen> {
     _tabs.add(_createTab());
   }
 
-  _InvoiceWorkspaceTab _createTab() {
+  _InvoiceWorkspaceTab _createTab([DocumentKind? kind]) {
     final id = _nextId++;
-    return _InvoiceWorkspaceTab(id: id, serial: id, kind: widget.kind);
+    return _InvoiceWorkspaceTab(id: id, serial: id, kind: kind ?? widget.kind);
   }
 
-  void _addInvoice() {
+  void _selectDocumentKind(DocumentKind kind) {
+    if (kind == DocumentKind.saleReturn ||
+        kind == DocumentKind.purchaseReturn) {
+      AppNavigation.open(
+        AppRoute(
+          type:
+              kind == DocumentKind.saleReturn
+                  ? RouteType.saleReturns
+                  : RouteType.purchaseReturns,
+        ),
+      );
+      return;
+    }
     setState(() {
-      _tabs.add(_createTab());
+      _tabs.add(_createTab(kind));
       _activeIndex = _tabs.length - 1;
     });
   }
@@ -105,12 +187,40 @@ class _NewDocumentScreenState extends State<NewDocumentScreen> {
     });
   }
 
+  Future<bool> _onWillPop() async {
+    if (_tabs.length > 1) {
+      await _requestClose(_activeIndex);
+      return false;
+    }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('مغادرة الفاتورة؟'),
+            content: const Text('سيتم إغلاق شاشة الفاتورة الحالية.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('البقاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('مغادرة'),
+              ),
+            ],
+          ),
+    );
+    return leave == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MyScaffold(
-      body: ColoredBox(
-        color: colors.bgPage,
+    final workspace = PremiumBackdrop(
+      child: ColoredBox(
+        // Keep invoice surfaces readable while preserving the same shared
+        // ledger canvas visible behind every feature page.
+        color: colors.bgPage.withValues(alpha: .14),
         child: Column(
           children: [
             _InvoiceTabsBar(
@@ -118,7 +228,8 @@ class _NewDocumentScreenState extends State<NewDocumentScreen> {
               activeIndex: _activeIndex,
               onSelected: (index) => setState(() => _activeIndex = index),
               onClose: _requestClose,
-              onAdd: _addInvoice,
+              onKindSelected: _selectDocumentKind,
+              onExpenseRequested: widget.onExpenseRequested,
             ),
             Expanded(
               child: IndexedStack(
@@ -138,6 +249,16 @@ class _NewDocumentScreenState extends State<NewDocumentScreen> {
           ],
         ),
       ),
+    );
+    if (widget.embedded) {
+      return WillPopScope(
+        onWillPop: _onWillPop,
+        child: Scaffold(body: workspace),
+      );
+    }
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: MyScaffold(body: workspace),
     );
   }
 }
@@ -166,27 +287,186 @@ class _InvoiceTabsBar extends StatelessWidget {
     required this.activeIndex,
     required this.onSelected,
     required this.onClose,
-    required this.onAdd,
+    required this.onKindSelected,
+    this.onExpenseRequested,
   });
 
   final List<_InvoiceWorkspaceTab> tabs;
   final int activeIndex;
   final ValueChanged<int> onSelected;
   final ValueChanged<int> onClose;
-  final VoidCallback onAdd;
+  final ValueChanged<DocumentKind> onKindSelected;
+  final Future<void> Function(BuildContext context)? onExpenseRequested;
+
+  Future<void> _showDocumentKindPicker(BuildContext context) async {
+    final selected = await showDialog<DocumentKind>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: .48),
+      builder: (dialogContext) {
+        final colors = dialogContext.colors;
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+          backgroundColor: Colors.transparent,
+          child: Container(
+            width: 560,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: colors.bgElevated,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .28),
+                  blurRadius: 34,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: colors.primary.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: Icon(
+                        Iconsax.document_text_1,
+                        color: colors.primary,
+                        size: 21,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'إنشاء مستند جديد',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'اختر نوع العملية التي تريد تسجيلها',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cardWidth =
+                        constraints.maxWidth < 440
+                            ? constraints.maxWidth
+                            : (constraints.maxWidth - 10) / 2;
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final kind in DocumentKind.values)
+                          _DocumentKindChoice(
+                            kind: kind,
+                            width: cardWidth,
+                            onTap: () => Navigator.pop(dialogContext, kind),
+                          ),
+                        if (onExpenseRequested != null)
+                          SizedBox(
+                            width: cardWidth,
+                            height: 82,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(dialogContext);
+                                onExpenseRequested!(context);
+                              },
+                              icon: Icon(
+                                Iconsax.money_send,
+                                color: colors.error,
+                              ),
+                              label: const Text('مصروف'),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null) onKindSelected(selected);
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final compact = MediaQuery.sizeOf(context).width < 700;
     return Container(
-      height: 70,
-      padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 14, 8),
+      height: compact ? 58 : 70,
+      padding: EdgeInsetsDirectional.fromSTEB(
+        compact ? 10 : 16,
+        7,
+        compact ? 8 : 14,
+        7,
+      ),
       decoration: BoxDecoration(
-        color: colors.bgPage,
+        color: colors.bgPage.withValues(alpha: .58),
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
+          Material(
+            color: colors.primary.withValues(alpha: .13),
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: () => _showDocumentKindPicker(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                height: compact ? 42 : 48,
+                padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colors.primary.withValues(alpha: .25),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded, color: colors.primary, size: 20),
+                    if (!compact) ...[
+                      const SizedBox(width: 7),
+                      Text(
+                        'مستند جديد',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
@@ -196,13 +476,13 @@ class _InvoiceTabsBar extends StatelessWidget {
                 final tab = tabs[index];
                 final active = index == activeIndex;
                 return Material(
-                  color: colors.bgElevated,
+                  color: colors.bgElevated.withValues(alpha: .62),
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => onSelected(index),
                     child: Container(
-                      width: 205,
+                      width: compact ? 142 : 205,
                       padding: const EdgeInsetsDirectional.only(
                         start: 14,
                         end: 6,
@@ -260,16 +540,17 @@ class _InvoiceTabsBar extends StatelessWidget {
                                       ),
                                     ),
                                     const SizedBox(height: 2),
-                                    Text(
-                                      tab.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: colors.textSecondary,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w600,
+                                    if (!compact)
+                                      Text(
+                                        tab.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: colors.textSecondary,
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ),
@@ -309,13 +590,107 @@ class _InvoiceTabsBar extends StatelessWidget {
               },
             ),
           ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text('فاتورة جديدة'),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+class _DocumentKindChoice extends StatelessWidget {
+  const _DocumentKindChoice({
+    required this.kind,
+    required this.width,
+    required this.onTap,
+  });
+
+  final DocumentKind kind;
+  final double width;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final (icon, accent, description) = switch (kind) {
+      DocumentKind.sale => (
+        Iconsax.receipt_add,
+        colors.primary,
+        'تسجيل مبيعات وقبض',
+      ),
+      DocumentKind.purchase => (
+        Iconsax.shopping_cart,
+        colors.success,
+        'تسجيل مشتريات ودفع',
+      ),
+      DocumentKind.saleReturn => (
+        Iconsax.undo,
+        colors.secondary,
+        'إرجاع فاتورة بيع',
+      ),
+      DocumentKind.purchaseReturn => (
+        Iconsax.redo,
+        colors.secondary,
+        'إرجاع فاتورة شراء',
+      ),
+      DocumentKind.waste => (Iconsax.trash, colors.error, 'تسجيل مواد تالفة'),
+    };
+    final title =
+        kind == DocumentKind.waste ? 'مستند هالك' : 'فاتورة ${kind.label}';
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: accent.withValues(alpha: .07),
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(15),
+          child: Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: accent.withValues(alpha: .20)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, color: accent, size: 19),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        style: TextStyle(color: colors.textDim, fontSize: 9.5),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: accent.withValues(alpha: .75),
+                  size: 13,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -422,12 +797,25 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
   final _note = TextEditingController();
   final List<_DraftLine> _lines = [];
   late final Future<_EditorData> _editorData;
+  late final KeyboardManager _keyboardManager;
+  late final InvoiceShortcutMacroNotifier _invoiceMacros;
 
   String? _warehouseId;
   String? _partyId;
   String? _cashboxId;
+  String? _currencyCode;
+  int _exchangeRateMicros = CurrencyMath.rateScale;
+  String? _equivalentCurrencyCode;
+  int _equivalentRateMicros = CurrencyMath.rateScale;
+  bool _selectedCurrencyIsBase = true;
   bool _saving = false;
   bool _dirty = false;
+  String? _draftId;
+  Timer? _autoSaveTimer;
+  Future<void>? _activeAutoSave;
+  bool _autoSaveInProgress = false;
+  bool _autoSaveQueued = false;
+  String _autoSaveLabel = 'يحفظ تلقائياً';
 
   bool get _isPurchase => widget.kind == DocumentKind.purchase;
   bool get _isWaste => widget.kind == DocumentKind.waste;
@@ -436,14 +824,82 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
   void initState() {
     super.initState();
     _editorData = _loadEditorData();
+    _keyboardManager = ref.read(keyboardManagerProvider);
+    _invoiceMacros = ref.read(invoiceShortcutMacroProvider);
+    _keyboardManager.register(this, KeyboardContext.invoice);
+    _keyboardManager.on(KeyboardAction.invoiceAddLine, () => _addLine(context));
+    _invoiceMacros.addListener(_applyPendingMacro);
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
+    _keyboardManager.unregister(this);
+    _keyboardManager.off(KeyboardAction.invoiceAddLine);
+    _invoiceMacros.removeListener(_applyPendingMacro);
     _documentDiscount.dispose();
     _paid.dispose();
     _note.dispose();
     super.dispose();
+  }
+
+  Future<void> _applyPendingMacro() async {
+    final macro = _invoiceMacros.takePending();
+    if (macro == null || !mounted || _warehouseId == null) return;
+    final inventory = ref.read(inventoryRepositoryProvider);
+    final master = ref.read(masterDataRepositoryProvider);
+    final products = await inventory.listSellableProducts(
+      warehouseId: _warehouseId,
+    );
+    final added = <_DraftLine>[];
+    for (final entry in macro.lines) {
+      final matches = products.where((p) => p.productId == entry.productId);
+      final product = matches.isEmpty ? null : matches.first;
+      if (product == null) continue;
+      final units = await master.listProductUnits(entry.productId);
+      if (units.isEmpty) continue;
+      final unit = units.firstWhere(
+        (u) => u.isPrimary,
+        orElse: () => units.first,
+      );
+      final itemId =
+          product.inventoryItemId ??
+          await inventory.ensureInventoryItemForProduct(
+            productId: entry.productId,
+            warehouseId: _warehouseId!,
+          );
+      added.add(
+        _DraftLine(
+          inventoryItemId: itemId,
+          productId: entry.productId,
+          productUnitId: unit.id!,
+          productName: product.productName,
+          unitName: unit.name,
+          quantity: entry.quantity,
+          unitFactor: unit.factor,
+          unitPriceMinor:
+              _isPurchase
+                  ? 0
+                  : CurrencyMath.fromBaseMinor(
+                    unit.salePriceMinor,
+                    _exchangeRateMicros,
+                  ),
+          lineDiscountMinor: 0,
+        ),
+      );
+    }
+    if (!mounted) return;
+    if (added.isEmpty) {
+      CustomSnackBar.showWarningSnackbar(
+        'لم تتوفر منتجات هذا الاختصار في المستودع المحدد',
+      );
+      return;
+    }
+    setState(() => _lines.addAll(added));
+    _markDirty();
+    CustomSnackBar.showSuccessSnackbar(
+      'تمت إضافة ${added.length} بند من اختصار ${macro.name}',
+    );
   }
 
   @override
@@ -486,7 +942,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
   }) {
     if (widget.embedded) {
       return ColoredBox(
-        color: context.colors.bgPage.withValues(alpha: .74),
+        color: context.colors.bgPage.withValues(alpha: .16),
         child: child,
       );
     }
@@ -500,9 +956,196 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
   }
 
   void _markDirty() {
+    _scheduleAutoSave();
     if (_dirty) return;
     _dirty = true;
     widget.onDirtyChanged?.call(true);
+  }
+
+  void _scheduleAutoSave() {
+    if (_isWaste) return;
+    _autoSaveTimer?.cancel();
+    if (mounted) setState(() => _autoSaveLabel = 'بانتظار الحفظ…');
+    _autoSaveTimer = Timer(
+      const Duration(milliseconds: 450),
+      () => _activeAutoSave = _persistDraft(),
+    );
+  }
+
+  List<SaleLineInput> _saleInputs() => _lines
+      .map(
+        (line) => SaleLineInput(
+          inventoryItemId: line.inventoryItemId,
+          productUnitId: line.productUnitId,
+          quantity: line.quantity,
+          unitFactor: line.unitFactor,
+          unitPriceMinor: _toBaseMinor(line.unitPriceMinor),
+          lineDiscountMinor: _toBaseMinor(line.lineDiscountMinor),
+        ),
+      )
+      .toList(growable: false);
+
+  List<PurchaseLineInput> _purchaseInputs() => _lines
+      .map(
+        (line) => PurchaseLineInput(
+          inventoryItemId: line.inventoryItemId,
+          productUnitId: line.productUnitId,
+          quantity: line.quantity,
+          unitFactor: line.unitFactor,
+          unitCostMinor: _toBaseMinor(line.unitPriceMinor),
+          lineDiscountMinor: _toBaseMinor(line.lineDiscountMinor),
+        ),
+      )
+      .toList(growable: false);
+
+  Future<void> _persistDraft() async {
+    if (!mounted || _isWaste) return;
+    if (_lines.isEmpty) {
+      try {
+        if (_draftId != null) {
+          final repo = ref.read(documentRepositoryProvider);
+          await repo.deleteDraft(
+            documentId: _draftId!,
+            type: _isPurchase ? 'purchase' : 'sale',
+          );
+          _draftId = null;
+        }
+        if (mounted) {
+          _dirty = false;
+          widget.onDirtyChanged?.call(false);
+          setState(() => _autoSaveLabel = 'لا توجد بنود للحفظ');
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() => _autoSaveLabel = 'تعذر تحديث المسودة تلقائياً');
+        }
+      }
+      return;
+    }
+    if (_isPurchase && _partyId == null) {
+      setState(() => _autoSaveLabel = 'اختر المورد للحفظ التلقائي');
+      return;
+    }
+    if (_autoSaveInProgress) {
+      _autoSaveQueued = true;
+      return;
+    }
+    _autoSaveInProgress = true;
+    setState(() => _autoSaveLabel = 'جارٍ الحفظ…');
+    try {
+      final repo = ref.read(documentRepositoryProvider);
+      final foreignDiscount = Money.fromMajor(_documentDiscount.text);
+      final foreignSubtotal = _lines.fold<int>(
+        0,
+        (sum, line) => sum + line.lineTotalMinor,
+      );
+      if (foreignDiscount < 0 || foreignDiscount > foreignSubtotal) {
+        throw const FormatException('خصم الفاتورة غير صالح');
+      }
+      var discount = _toBaseMinor(foreignDiscount);
+      final saleInputs = _isPurchase ? const <SaleLineInput>[] : _saleInputs();
+      final purchaseInputs =
+          _isPurchase ? _purchaseInputs() : const <PurchaseLineInput>[];
+      final baseSubtotal =
+          _isPurchase
+              ? purchaseInputs.fold<int>(
+                0,
+                (sum, item) => sum + item.lineTotalMinor,
+              )
+              : saleInputs.fold<int>(
+                0,
+                (sum, item) => sum + item.lineTotalMinor,
+              );
+      discount = discount.clamp(0, baseSubtotal).toInt();
+      final baseFinal =
+          (baseSubtotal - discount).clamp(0, baseSubtotal).toInt();
+      final foreignFinal = foreignSubtotal - foreignDiscount;
+      var foreignPaid = Money.fromMajor(_paid.text);
+      if (!_isPurchase && _partyId == null) {
+        foreignPaid = foreignFinal;
+      }
+      if (foreignPaid < 0 || foreignPaid > foreignFinal) {
+        throw const FormatException('قيمة الدفعة أكبر من إجمالي الفاتورة');
+      }
+      final paid =
+          foreignPaid == foreignFinal
+              ? baseFinal
+              : _toBaseMinor(foreignPaid).clamp(0, baseFinal).toInt();
+      if (_isPurchase) {
+        if (_draftId == null) {
+          _draftId = await repo.createPurchaseDraft(
+            supplierId: _partyId!,
+            cashboxId: _cashboxId,
+            discountMinor: discount,
+            paidMinor: paid,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: foreignSubtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaid,
+            items: purchaseInputs,
+          );
+        } else {
+          await repo.updatePurchaseDraft(
+            purchaseId: _draftId!,
+            supplierId: _partyId!,
+            cashboxId: _cashboxId,
+            discountMinor: discount,
+            paidMinor: paid,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: foreignSubtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaid,
+            items: purchaseInputs,
+          );
+        }
+      } else if (_draftId == null) {
+        _draftId = await repo.createSaleDraft(
+          partyId: _partyId,
+          cashboxId: _cashboxId,
+          discountMinor: discount,
+          paidMinor: paid,
+          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+          currencyCode: _currencyCode,
+          exchangeRateMicros: _exchangeRateMicros,
+          foreignSubtotalMinor: foreignSubtotal,
+          foreignDiscountMinor: foreignDiscount,
+          foreignPaidMinor: foreignPaid,
+          items: saleInputs,
+        );
+      } else {
+        await repo.updateSaleDraft(
+          saleId: _draftId!,
+          partyId: _partyId,
+          cashboxId: _cashboxId,
+          discountMinor: discount,
+          paidMinor: paid,
+          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+          currencyCode: _currencyCode,
+          exchangeRateMicros: _exchangeRateMicros,
+          foreignSubtotalMinor: foreignSubtotal,
+          foreignDiscountMinor: foreignDiscount,
+          foreignPaidMinor: foreignPaid,
+          items: saleInputs,
+        );
+      }
+      if (mounted) {
+        _dirty = false;
+        widget.onDirtyChanged?.call(false);
+        setState(() => _autoSaveLabel = 'تم الحفظ تلقائياً');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _autoSaveLabel = 'تعذر الحفظ التلقائي');
+    } finally {
+      _autoSaveInProgress = false;
+      if (_autoSaveQueued) {
+        _autoSaveQueued = false;
+        _scheduleAutoSave();
+      }
+    }
   }
 
   void _markClean() {
@@ -512,30 +1155,55 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
   }
 
   Widget _body(BuildContext context, _EditorData data) {
-    final currency =
+    final baseCurrency =
         ref.watch(localContextProvider).asData?.value.currencyCode ?? 'USD';
+    final configuredCurrencies = ref.watch(currenciesProvider).asData?.value;
+    final editorData =
+        configuredCurrencies == null || configuredCurrencies.isEmpty
+            ? data
+            : _EditorData(
+              warehouses: data.warehouses,
+              parties: data.parties,
+              cashboxes: data.cashboxes,
+              currencies: configuredCurrencies,
+            );
+    _currencyCode ??= baseCurrency;
+    final selectedCurrency = editorData.currencies.where(
+      (currency) => currency.code == _currencyCode,
+    );
+    if (selectedCurrency.isNotEmpty) {
+      _exchangeRateMicros = selectedCurrency.first.rateMicros;
+    }
+    final currency = _currencyCode ?? baseCurrency;
+    _selectedCurrencyIsBase = currency == baseCurrency;
+    if (_selectedCurrencyIsBase) {
+      final dollars = editorData.currencies.where(
+        (item) => item.code == 'USD' && !item.isBase && item.rateMicros > 0,
+      );
+      _equivalentCurrencyCode = dollars.isEmpty ? null : 'USD';
+      _equivalentRateMicros =
+          dollars.isEmpty ? CurrencyMath.rateScale : dollars.first.rateMicros;
+    } else {
+      _equivalentCurrencyCode = baseCurrency;
+      _equivalentRateMicros = _exchangeRateMicros;
+    }
     final subtotal = _lines.fold<int>(
       0,
       (sum, line) => sum + line.lineTotalMinor,
     );
     final discount = _safeMoney(_documentDiscount.text);
     final finalMinor = (subtotal - discount).clamp(0, subtotal).toInt();
-    final icon = switch (widget.kind) {
-      DocumentKind.sale => Iconsax.receipt_add,
-      DocumentKind.purchase => Iconsax.shopping_cart,
-      DocumentKind.waste => Iconsax.warning_2,
-      _ => Icons.description_outlined,
-    };
-
     return _professionalInvoiceBody(
       context,
-      data: data,
+      data: editorData,
       currency: currency,
       subtotal: subtotal,
       finalMinor: finalMinor,
-      icon: icon,
     );
   }
+
+  int _toBaseMinor(int foreignMinor) =>
+      CurrencyMath.toBaseMinor(foreignMinor, _exchangeRateMicros);
 
   Widget _professionalInvoiceBody(
     BuildContext context, {
@@ -543,7 +1211,6 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     required String currency,
     required int subtotal,
     required int finalMinor,
-    required IconData icon,
   }) {
     final colors = context.colors;
     final content = LayoutBuilder(
@@ -551,268 +1218,169 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
         final compact = constraints.maxWidth < 760;
         final desktop = constraints.maxWidth >= 1080;
         final horizontal = compact ? 12.0 : 20.0;
+        final desktopSummaryHeight =
+            constraints.maxHeight > 562 ? constraints.maxHeight - 42 : 520.0;
+        final desktopItemsHeight =
+            constraints.maxHeight > 680 ? constraints.maxHeight - 160 : 520.0;
 
-        return ColoredBox(
-          color: colors.bgPage,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 26),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1420),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _invoiceTitleBand(context, icon, compact: compact),
-                          const SizedBox(height: 18),
-                          if (desktop)
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 318,
-                                  child: Column(
-                                    children: [
-                                      _invoiceInformationPanel(
-                                        context,
-                                        data,
-                                        sidebar: true,
-                                      ),
-                                      const SizedBox(height: 14),
-                                      _invoiceBottomSection(
-                                        context,
-                                        currency: currency,
-                                        subtotal: subtotal,
-                                        finalMinor: finalMinor,
-                                        sidebar: true,
-                                      ),
-                                      const SizedBox(height: 14),
-                                      _invoiceQuickActions(context),
-                                    ],
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: ColoredBox(
+                // Panels still provide the reading surface; the page canvas stays
+                // subtly visible through the free areas of the invoice workspace.
+                color: colors.bgPage.withValues(alpha: .42),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          16,
+                          horizontal,
+                          26,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (desktop)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        _invoiceInformationPanel(
+                                          context,
+                                          data,
+                                          horizontal: true,
+                                        ),
+                                        const SizedBox(height: 14),
+                                        _invoiceItemsPanel(
+                                          context,
+                                          currency,
+                                          minHeight: desktopItemsHeight,
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 18),
-                                Expanded(
-                                  child: Column(
-                                    children: [
-                                      _invoiceItemsPanel(context, currency),
-                                    ],
+                                  const SizedBox(width: 14),
+                                  SizedBox(
+                                    width: 306,
+                                    child: _invoiceBottomSection(
+                                      context,
+                                      currency: currency,
+                                      subtotal: subtotal,
+                                      finalMinor: finalMinor,
+                                      sidebar: true,
+                                      minHeight: desktopSummaryHeight,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            )
-                          else ...[
-                            _invoiceInformationPanel(context, data),
-                            const SizedBox(height: 14),
-                            _invoiceBottomSection(
-                              context,
-                              currency: currency,
-                              subtotal: subtotal,
-                              finalMinor: finalMinor,
-                            ),
-                            const SizedBox(height: 14),
-                            _invoiceItemsPanel(context, currency),
+                                ],
+                              )
+                            else ...[
+                              _invoiceInformationPanel(
+                                context,
+                                data,
+                                horizontal: !compact,
+                              ),
+                              const SizedBox(height: 14),
+                              _invoiceItemsPanel(context, currency),
+                              const SizedBox(height: 14),
+                              _invoiceBottomSection(
+                                context,
+                                currency: currency,
+                                subtotal: subtotal,
+                                finalMinor: finalMinor,
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
-              if (compact)
-                _invoiceActionBar(
-                  context,
-                  compact: true,
-                  finalMinor: finalMinor,
-                  currency: currency,
+            ),
+            if (compact)
+              PositionedDirectional(
+                end: 16,
+                bottom: 18,
+                child: FloatingActionButton.extended(
+                  heroTag: 'invoice-add-line-${widget.kind.name}',
+                  onPressed: () => _addLine(context),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('إضافة بند'),
                 ),
-            ],
-          ),
+              ),
+          ],
         );
       },
     );
     return _editorFrame(context, content);
   }
 
-  Widget _invoiceTitleBand(
-    BuildContext context,
-    IconData icon, {
-    required bool compact,
-  }) {
-    final colors = context.colors;
-    final title = _isWaste ? 'مستند هالك' : 'فاتورة ${widget.kind.label} جديدة';
-
-    final identity = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            color: colors.primary.withValues(alpha: .10),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(icon, color: colors.primary, size: 27),
-        ),
-        const SizedBox(width: 14),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: colors.textPrimary,
-                      fontSize: compact ? 19 : 23,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -.25,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colors.success.withValues(alpha: .10),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'مسودة',
-                      style: TextStyle(
-                        color: colors.success,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 5),
-              Text(
-                _isWaste
-                    ? 'أضف بنود الهالك ثم اعتمد المستند'
-                    : 'أضف الطرف وبنود الفاتورة ثم احفظها',
-                style: TextStyle(color: colors.textDim, fontSize: 11.5),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    final actions = Wrap(
-      spacing: 9,
-      runSpacing: 9,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (!_isWaste)
-          OutlinedButton.icon(
-            onPressed: _saving ? null : () => _save(post: false),
-            icon: const Icon(Iconsax.save_2, size: 17),
-            label: const Text('حفظ كمسودة'),
-          ),
-        FilledButton.icon(
-          onPressed: _saving ? null : () => _save(post: true),
-          icon:
-              _saving
-                  ? const SizedBox(
-                    width: 17,
-                    height: 17,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                  : const Icon(Icons.check_rounded, size: 19),
-          label: Text(_isWaste ? 'اعتماد المستند' : 'حفظ الفاتورة'),
-        ),
-      ],
-    );
-
-    return Container(
-      padding: EdgeInsets.all(compact ? 14 : 18),
-      decoration: BoxDecoration(
-        color: colors.bgElevated,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-        boxShadow: [
-          BoxShadow(
-            color: colors.bgDeep.withValues(alpha: .06),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child:
-          compact
-              ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [identity, const SizedBox(height: 14), actions],
-              )
-              : Row(
-                children: [
-                  Expanded(child: identity),
-                  const SizedBox(width: 20),
-                  actions,
-                ],
-              ),
-    );
-  }
-
   Widget _invoiceInformationPanel(
     BuildContext context,
     _EditorData data, {
     bool sidebar = false,
+    bool horizontal = false,
   }) {
     final colors = context.colors;
+    final baseCurrency =
+        ref.read(localContextProvider).asData?.value.currencyCode ??
+        CurrencyDefaults.baseCode;
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding:
+          horizontal
+              ? const EdgeInsets.symmetric(horizontal: 11, vertical: 8)
+              : EdgeInsets.all(sidebar ? 11 : 15),
       decoration: BoxDecoration(
-        color: colors.bgElevated,
+        color: colors.bgElevated.withValues(alpha: .62),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: .08),
-                  borderRadius: BorderRadius.circular(9),
+          if (!horizontal) ...[
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Icon(
+                    Iconsax.document_text,
+                    color: colors.primary,
+                    size: 18,
+                  ),
                 ),
-                child: Icon(
-                  Iconsax.document_text,
-                  color: colors.primary,
-                  size: 18,
+                const SizedBox(width: 10),
+                Text(
+                  _isWaste ? 'معلومات المستند' : 'معلومات الفاتورة',
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _isWaste ? 'معلومات المستند' : 'معلومات الفاتورة',
-                style: TextStyle(
-                  color: colors.textPrimary,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
+              ],
+            ),
+            SizedBox(height: sidebar ? 10 : 16),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
               final columns =
-                  sidebar || constraints.maxWidth < 620
+                  sidebar
                       ? 1
+                      : horizontal
+                      ? (constraints.maxWidth >= 1000 ? 4 : 2)
                       : constraints.maxWidth >= 900
                       ? 3
                       : 2;
@@ -828,20 +1396,23 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsetsDirectional.only(
+                        padding: EdgeInsetsDirectional.only(
                           start: 2,
-                          bottom: 6,
+                          bottom: horizontal ? 3 : (sidebar ? 4 : 6),
                         ),
                         child: Text(
                           label,
                           style: TextStyle(
                             color: colors.textSecondary,
-                            fontSize: 10.5,
+                            fontSize: horizontal ? 9.5 : 10.5,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
-                      child,
+                      if (horizontal)
+                        SizedBox(height: 50, child: child)
+                      else
+                        child,
                     ],
                   ),
                 );
@@ -948,6 +1519,86 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                       ),
                     ),
                   ),
+                if (!_isWaste)
+                  field(
+                    'عملة الفاتورة',
+                    DropdownButtonFormField<String>(
+                      value: _currencyCode,
+                      isExpanded: true,
+                      items: data.currencies
+                          .where((currency) => currency.rateMicros > 0)
+                          .map(
+                            (currency) => DropdownMenuItem(
+                              value: currency.code,
+                              child: Text(
+                                currency.isBase
+                                    ? '${currency.code} • الأساسية'
+                                    : '${currency.code} • 1 = ${CurrencyMath.formatRateMicros(currency.rateMicros)}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged:
+                          _lines.isNotEmpty
+                              ? null
+                              : (value) {
+                                if (value == null) return;
+                                final selected = data.currencies.firstWhere(
+                                  (currency) => currency.code == value,
+                                );
+                                setState(() {
+                                  _currencyCode = selected.code;
+                                  _exchangeRateMicros = selected.rateMicros;
+                                });
+                                _markDirty();
+                              },
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(
+                          Icons.currency_exchange_rounded,
+                          size: 18,
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                if (_isPurchase && !_selectedCurrencyIsBase)
+                  field(
+                    'سعر الصرف (1 ${_currencyCode ?? baseCurrency} = $baseCurrency)',
+                    TextFormField(
+                      key: ValueKey('purchase-rate-$_currencyCode'),
+                      initialValue: CurrencyMath.formatRateMicros(
+                        _exchangeRateMicros,
+                      ),
+                      enabled: _lines.isEmpty,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: (value) {
+                        try {
+                          final rate = CurrencyMath.parseRateMicros(value);
+                          if (rate == _exchangeRateMicros) return;
+                          setState(() => _exchangeRateMicros = rate);
+                          _markDirty();
+                        } on FormatException {
+                          // Keep the entered value visible while it is edited;
+                          // saving validates it again before posting.
+                        }
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'مثال: 1400',
+                        helperText:
+                            _lines.isEmpty
+                                ? 'تُحوّل كلفة المخزون تلقائياً إلى $baseCurrency.'
+                                : 'لا يغيّر سعر الصرف بعد إضافة البنود.',
+                        prefixIcon: const Icon(
+                          Icons.currency_exchange_rounded,
+                          size: 18,
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
                 field(
                   _isWaste
                       ? 'ملاحظة المستند'
@@ -956,8 +1607,8 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                       : 'ملاحظة العميل',
                   TextField(
                     controller: _note,
-                    minLines: sidebar ? 2 : 1,
-                    maxLines: 3,
+                    minLines: 1,
+                    maxLines: horizontal ? 1 : (sidebar ? 2 : 3),
                     onChanged: (_) => _markDirty(),
                     decoration: const InputDecoration(
                       hintText: 'أضف ملاحظة اختيارية...',
@@ -969,7 +1620,11 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                 ),
               ];
 
-              return Wrap(spacing: 12, runSpacing: 12, children: fields);
+              return Wrap(
+                spacing: 12,
+                runSpacing: sidebar ? 8 : 12,
+                children: fields,
+              );
             },
           ),
         ],
@@ -982,7 +1637,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: colors.bgElevated,
+        color: colors.bgElevated.withValues(alpha: .56),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: colors.border),
       ),
@@ -997,90 +1652,19 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     );
   }
 
-  Widget _invoiceQuickActions(BuildContext context) {
+  Widget _invoiceItemsPanel(
+    BuildContext context,
+    String currency, {
+    double? minHeight,
+  }) {
     final colors = context.colors;
-    Widget action({
-      required IconData icon,
-      required String label,
-      required VoidCallback? onTap,
-      bool danger = false,
-    }) {
-      final accent = danger ? colors.error : colors.primary;
-      return Expanded(
-        child: OutlinedButton.icon(
-          onPressed: onTap,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: danger ? colors.error : colors.textPrimary,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          ),
-          icon: Icon(icon, size: 16, color: accent),
-          label: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10.5),
-          ),
-        ),
-      );
-    }
-
+    final compact = MediaQuery.sizeOf(context).width < 760;
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.bgElevated,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: colors.border),
+      constraints: BoxConstraints(
+        minHeight: minHeight ?? (compact ? 280 : 420),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(Iconsax.flash_1, color: colors.primary, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'إجراءات سريعة',
-                style: TextStyle(
-                  color: colors.textPrimary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              action(
-                icon: Iconsax.box_add,
-                label: 'إضافة بند',
-                onTap: () => _addLine(context),
-              ),
-              const SizedBox(width: 8),
-              action(
-                icon: Icons.delete_sweep_outlined,
-                label: 'مسح البنود',
-                danger: true,
-                onTap:
-                    _lines.isEmpty
-                        ? null
-                        : () {
-                          setState(_lines.clear);
-                          _markDirty();
-                        },
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _invoiceItemsPanel(BuildContext context, String currency) {
-    final colors = context.colors;
-    return Container(
       decoration: BoxDecoration(
-        color: colors.bgElevated,
+        color: colors.bgElevated.withValues(alpha: .62),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: colors.border),
       ),
@@ -1123,61 +1707,13 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                     ],
                   ),
                 ),
-                FilledButton.icon(
-                  onPressed: () => _addLine(context),
-                  icon: const Icon(Icons.add_rounded, size: 17),
-                  label: const Text('إضافة منتج'),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-            child: InkWell(
-              onTap: () => _addLine(context),
-              borderRadius: BorderRadius.circular(11),
-              child: Container(
-                height: 44,
-                padding: const EdgeInsets.symmetric(horizontal: 13),
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: .035),
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: colors.primary.withValues(alpha: .14),
+                if (!compact)
+                  FilledButton.icon(
+                    onPressed: () => _addLine(context),
+                    icon: const Icon(Icons.add_rounded, size: 17),
+                    label: const Text('إضافة بند'),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search_rounded, color: colors.textDim, size: 19),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Text(
-                        'ابحث عن منتج أو امسح الباركود...',
-                        style: TextStyle(color: colors.textDim, fontSize: 11.5),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colors.bgElevated,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        'F2',
-                        style: TextStyle(
-                          color: colors.textDim,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              ],
             ),
           ),
           if (_lines.isEmpty)
@@ -1200,15 +1736,17 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'ابدأ بالبحث أو اضغط على “إضافة منتج”',
+                    'اضغط على “إضافة بند” لاختيار منتج',
                     style: TextStyle(color: colors.textDim, fontSize: 10.5),
                   ),
-                  const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    onPressed: () => _addLine(context),
-                    icon: const Icon(Icons.add_rounded, size: 17),
-                    label: const Text('إضافة أول بند'),
-                  ),
+                  if (!compact) ...[
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: () => _addLine(context),
+                      icon: const Icon(Icons.add_rounded, size: 17),
+                      label: const Text('إضافة أول بند'),
+                    ),
+                  ],
                 ],
               ),
             )
@@ -1233,41 +1771,42 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                   color: colors.border,
                 ),
             ],
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Material(
-                color: colors.primary.withValues(alpha: .06),
-                borderRadius: BorderRadius.circular(10),
-                child: InkWell(
+            if (!compact)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Material(
+                  color: colors.primary.withValues(alpha: .06),
                   borderRadius: BorderRadius.circular(10),
-                  onTap: () => _addLine(context),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.add_rounded,
-                          color: colors.primary,
-                          size: 19,
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          'إضافة بند جديد',
-                          style: TextStyle(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _addLine(context),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.add_rounded,
                             color: colors.primary,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w900,
+                            size: 19,
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        _shortcutBadge(context, 'Ctrl + Enter'),
-                      ],
+                          const SizedBox(width: 7),
+                          Text(
+                            'إضافة بند جديد',
+                            style: TextStyle(
+                              color: colors.primary,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _shortcutBadge(context, 'Ctrl + Enter'),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ],
       ),
@@ -1331,6 +1870,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     required int subtotal,
     required int finalMinor,
     bool sidebar = false,
+    double? minHeight,
   }) {
     return _invoiceSummaryCard(
       context,
@@ -1338,6 +1878,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
       subtotal: subtotal,
       finalMinor: finalMinor,
       sidebar: sidebar,
+      minHeight: minHeight,
     );
   }
 
@@ -1347,6 +1888,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     required int subtotal,
     required int finalMinor,
     bool sidebar = false,
+    double? minHeight,
   }) {
     final colors = context.colors;
     final gross = _lines.fold<int>(
@@ -1362,6 +1904,12 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     final paid = _safeMoney(_paid.text);
     final remaining = (finalMinor - paid).clamp(0, finalMinor).toInt();
     final quantity = _lines.fold<double>(0, (sum, line) => sum + line.quantity);
+    final equivalentCurrency = _equivalentCurrencyCode;
+    final showEquivalent = equivalentCurrency != null;
+    final equivalentFinalMinor =
+        _selectedCurrencyIsBase
+            ? CurrencyMath.fromBaseMinor(finalMinor, _equivalentRateMicros)
+            : CurrencyMath.toBaseMinor(finalMinor, _equivalentRateMicros);
 
     if (sidebar) {
       Widget summaryRow(
@@ -1371,7 +1919,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
         bool strong = false,
       }) {
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: EdgeInsets.symmetric(vertical: sidebar ? 4 : 6),
           child: Row(
             children: [
               Expanded(
@@ -1399,152 +1947,217 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
       }
 
       return Container(
-        padding: const EdgeInsets.all(15),
+        height: minHeight ?? 520,
+        padding: EdgeInsets.all(sidebar ? 11 : 15),
         decoration: BoxDecoration(
-          color: colors.bgElevated,
+          color: colors.bgElevated.withValues(alpha: .62),
           borderRadius: BorderRadius.circular(15),
           border: Border.all(color: colors.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: .08),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Icon(
-                    Iconsax.receipt_text,
-                    color: colors.primary,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    _isWaste ? 'ملخص المستند' : 'ملخص الفاتورة',
-                    style: TextStyle(
-                      color: colors.textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.visibility_outlined,
-                  color: colors.textDim,
-                  size: 17,
-                ),
-              ],
-            ),
-            const SizedBox(height: 11),
-            if (_isWaste) ...[
-              summaryRow('عدد البنود', '${_lines.length}'),
-              summaryRow('إجمالي الكمية', '$quantity', strong: true),
-            ] else ...[
-              summaryRow(
-                'المجموع الفرعي',
-                _formatMoney(context, gross, currency),
-              ),
-              summaryRow(
-                'خصم البنود',
-                lineDiscount == 0
-                    ? '—'
-                    : _formatMoney(context, lineDiscount, currency),
-                valueColor: lineDiscount == 0 ? colors.textDim : colors.error,
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _documentDiscount,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) {
-                  setState(() {});
-                  _markDirty();
-                },
-                decoration: const InputDecoration(
-                  labelText: 'خصم على الفاتورة',
-                  prefixIcon: Icon(Iconsax.discount_shape, size: 17),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 11),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 11,
-                ),
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: colors.primary.withValues(alpha: .18),
-                  ),
-                ),
-                child: Row(
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: Text(
-                        'الإجمالي',
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
+                    Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: colors.primary.withValues(alpha: .08),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: Icon(
+                            Iconsax.receipt_text,
+                            color: colors.primary,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Text(
+                            _isWaste ? 'ملخص المستند' : 'ملخص الفاتورة',
+                            style: TextStyle(
+                              color: colors.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.visibility_outlined,
+                          color: colors.textDim,
+                          size: 17,
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: sidebar ? 8 : 11),
+                    if (_isWaste) ...[
+                      summaryRow('عدد البنود', '${_lines.length}'),
+                      summaryRow('إجمالي الكمية', '$quantity', strong: true),
+                    ] else ...[
+                      summaryRow(
+                        'المجموع الفرعي',
+                        _formatMoney(context, gross, currency),
+                      ),
+                      summaryRow(
+                        'خصم البنود',
+                        lineDiscount == 0
+                            ? '—'
+                            : _formatMoney(context, lineDiscount, currency),
+                        valueColor:
+                            lineDiscount == 0 ? colors.textDim : colors.error,
+                      ),
+                      SizedBox(height: sidebar ? 4 : 6),
+                      TextField(
+                        controller: _documentDiscount,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (_) {
+                          setState(() {});
+                          _markDirty();
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'خصم على الفاتورة',
+                          prefixIcon: Icon(Iconsax.discount_shape, size: 17),
+                          isDense: true,
                         ),
                       ),
-                    ),
-                    Text(
-                      _formatMoney(context, finalMinor, currency),
-                      style: TextStyle(
-                        color: colors.primary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
+                      SizedBox(height: sidebar ? 8 : 11),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 11,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.primary.withValues(alpha: .10),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: colors.primary.withValues(alpha: .18),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'الإجمالي',
+                                style: TextStyle(
+                                  color: colors.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              _formatMoney(context, finalMinor, currency),
+                              style: TextStyle(
+                                color: colors.primary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                      if (showEquivalent) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_selectedCurrencyIsBase ? 'المقابل المرجعي' : 'المقابل المثبت في الدفاتر'}: '
+                          '${_formatMoney(context, equivalentFinalMinor, equivalentCurrency)}'
+                          ' • 1 ${_selectedCurrencyIsBase ? equivalentCurrency : currency} = '
+                          '${CurrencyMath.formatRateMicros(_equivalentRateMicros)} '
+                          '${_selectedCurrencyIsBase ? currency : equivalentCurrency}',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: colors.textSecondary,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                      SizedBox(height: sidebar ? 8 : 11),
+                      TextField(
+                        controller: _paid,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (_) {
+                          setState(() {});
+                          _markDirty();
+                        },
+                        decoration: InputDecoration(
+                          labelText:
+                              _isPurchase
+                                  ? 'المدفوع للمورد'
+                                  : 'المقبوض من العميل',
+                          prefixIcon: const Icon(
+                            Iconsax.wallet_money,
+                            size: 17,
+                          ),
+                          isDense: true,
+                        ),
+                      ),
+                      SizedBox(height: sidebar ? 3 : 5),
+                      summaryRow(
+                        remaining == 0 ? 'حالة الدفع' : 'المتبقي',
+                        remaining == 0
+                            ? 'مسددة'
+                            : _formatMoney(context, remaining, currency),
+                        valueColor:
+                            remaining == 0 ? colors.success : colors.secondary,
+                        strong: remaining != 0,
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(height: 11),
-              TextField(
-                controller: _paid,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) {
-                  setState(() {});
-                  _markDirty();
-                },
-                decoration: InputDecoration(
-                  labelText:
-                      _isPurchase ? 'المدفوع للمورد' : 'المقبوض من العميل',
-                  prefixIcon: const Icon(Iconsax.wallet_money, size: 17),
-                  isDense: true,
+            ),
+            const SizedBox(height: 12),
+            Divider(height: 1, color: colors.border),
+            const SizedBox(height: 10),
+            if (!_isWaste)
+              Text(
+                _autoSaveLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color:
+                      _autoSaveLabel.startsWith('تعذر')
+                          ? colors.error
+                          : colors.textDim,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 5),
-              summaryRow(
-                remaining == 0 ? 'حالة الدفع' : 'المتبقي',
-                remaining == 0
-                    ? 'مسددة'
-                    : _formatMoney(context, remaining, currency),
-                valueColor: remaining == 0 ? colors.success : colors.secondary,
-                strong: remaining != 0,
-              ),
-            ],
+            if (!_isWaste) const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _saving ? null : () => _save(post: true),
+              icon:
+                  _saving
+                      ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : const Icon(Iconsax.tick_circle, size: 17),
+              label: Text(_isWaste ? 'اعتماد المستند' : 'حفظ واعتماد'),
+            ),
           ],
         ),
       );
     }
 
     return Container(
+      constraints: BoxConstraints(minHeight: minHeight ?? 0),
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: colors.bgElevated,
+        color: colors.bgElevated.withValues(alpha: .62),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: colors.border),
       ),
@@ -1774,6 +2387,32 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
               return Wrap(spacing: 10, runSpacing: 10, children: children);
             },
           ),
+          if (!_isWaste && showEquivalent) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: colors.primary.withValues(alpha: .07),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: .16),
+                ),
+              ),
+              child: Text(
+                '${_selectedCurrencyIsBase ? 'المقابل المرجعي' : 'المقابل بعملة الدفاتر'}: '
+                '${_formatMoney(context, equivalentFinalMinor, equivalentCurrency)}'
+                '  •  1 ${_selectedCurrencyIsBase ? equivalentCurrency : currency} = '
+                '${CurrencyMath.formatRateMicros(_equivalentRateMicros)} '
+                '${_selectedCurrencyIsBase ? currency : equivalentCurrency}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
           if (!_isWaste && documentDiscount > subtotal && subtotal > 0) ...[
             const SizedBox(height: 10),
             Text(
@@ -1785,82 +2424,43 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _invoiceActionBar(
-    BuildContext context, {
-    required bool compact,
-    required int finalMinor,
-    required String currency,
-  }) {
-    final colors = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.bgElevated,
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      padding: EdgeInsets.fromLTRB(
-        compact ? 14 : 24,
-        11,
-        compact ? 14 : 24,
-        11,
-      ),
-      child: SafeArea(
-        top: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1180),
-            child: Row(
-              children: [
-                if (!compact && !_isWaste) ...[
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'الإجمالي',
-                        style: TextStyle(color: colors.textDim, fontSize: 9.5),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _formatMoney(context, finalMinor, currency),
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+          const SizedBox(height: 14),
+          Divider(height: 1, color: colors.border),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: _saving ? null : () => _save(post: true),
+                icon:
+                    _saving
+                        ? const SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Iconsax.tick_circle, size: 18),
+                label: Text(_isWaste ? 'اعتماد المستند' : 'حفظ واعتماد'),
+              ),
+              const SizedBox(width: 12),
+              if (!_isWaste)
+                Expanded(
+                  child: Text(
+                    _autoSaveLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          _autoSaveLabel.startsWith('تعذر')
+                              ? colors.error
+                              : colors.textDim,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                  const Spacer(),
-                ] else
-                  const Spacer(),
-                if (!_isWaste) ...[
-                  OutlinedButton(
-                    onPressed: _saving ? null : () => _save(post: false),
-                    child: const Text('حفظ كمسودة'),
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                FilledButton.icon(
-                  onPressed: _saving ? null : () => _save(post: true),
-                  icon:
-                      _saving
-                          ? const SizedBox(
-                            width: 17,
-                            height: 17,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                          : const Icon(Iconsax.tick_circle, size: 18),
-                  label: Text(_isWaste ? 'اعتماد المستند' : 'حفظ واعتماد'),
                 ),
-              ],
-            ),
+            ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1874,6 +2474,18 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
 
   Future<_EditorData> _loadEditorData() async {
     final master = ref.read(masterDataRepositoryProvider);
+    final local = await ref.read(localContextProvider.future);
+    final currencies = [
+      EntityCurrency(
+        code: local.currencyCode,
+        name: local.currencyCode,
+        symbol: local.currencyCode,
+        decimalDigits: 2,
+        isBase: true,
+        isActive: true,
+        rateMicros: CurrencyMath.rateScale,
+      ),
+    ];
     final parties = await master.listParties(
       type: _isPurchase ? 'supplier' : 'customer',
     );
@@ -1881,6 +2493,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
       warehouses: await master.listWarehouses(),
       parties: parties,
       cashboxes: await master.listCashboxes(),
+      currencies: currencies,
     );
   }
 
@@ -1904,11 +2517,21 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
     var unit = units.first;
     final qty = TextEditingController(text: '1');
     final price = TextEditingController(
-      text: _isPurchase ? '0' : _moneyInput(unit.salePriceMinor),
+      text:
+          _isPurchase
+              ? '0'
+              : _moneyInput(
+                CurrencyMath.fromBaseMinor(
+                  unit.salePriceMinor,
+                  _exchangeRateMicros,
+                ),
+              ),
     );
     final lineDiscount = TextEditingController(text: '0');
     final currency =
-        ref.read(localContextProvider).asData?.value.currencyCode ?? 'USD';
+        _currencyCode ??
+        ref.read(localContextProvider).asData?.value.currencyCode ??
+        'USD';
 
     int currentLineTotal() {
       if (_isWaste) return 0;
@@ -2003,7 +2626,7 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
               }
 
               return Dialog(
-                backgroundColor: Colors.transparent,
+                backgroundColor: colors.bgElevated,
                 surfaceTintColor: Colors.transparent,
                 insetPadding: const EdgeInsets.symmetric(
                   horizontal: 18,
@@ -2126,7 +2749,10 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                                               unit = nextUnits.first;
                                               if (!_isPurchase) {
                                                 price.text = _moneyInput(
-                                                  unit.salePriceMinor,
+                                                  CurrencyMath.fromBaseMinor(
+                                                    unit.salePriceMinor,
+                                                    _exchangeRateMicros,
+                                                  ),
                                                 );
                                               }
                                             });
@@ -2167,7 +2793,10 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                                               );
                                               if (!_isPurchase) {
                                                 price.text = _moneyInput(
-                                                  unit.salePriceMinor,
+                                                  CurrencyMath.fromBaseMinor(
+                                                    unit.salePriceMinor,
+                                                    _exchangeRateMicros,
+                                                  ),
                                                 );
                                               }
                                             });
@@ -2516,9 +3145,140 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
       CustomSnackBar.showWarningSnackbar('اختر مورداً');
       return;
     }
+    final repo = ref.read(documentRepositoryProvider);
+    final saleItems =
+        !_isPurchase && !_isWaste ? _saleInputs() : const <SaleLineInput>[];
+    var shortages = const <SaleStockShortage>[];
+    if (post && saleItems.isNotEmpty) {
+      try {
+        shortages = await repo.saleStockShortages(saleItems);
+      } catch (error) {
+        if (mounted) {
+          CustomSnackBar.showErrorSnackbar(
+            'تعذر التحقق من رصيد المخزون: $error',
+          );
+        }
+        return;
+      }
+      if (!mounted) return;
+    }
+    if (post) {
+      final subtotal = _lines.fold<int>(
+        0,
+        (sum, line) => sum + line.lineTotalMinor,
+      );
+      final discount = Money.fromMajor(_documentDiscount.text);
+      final total = (subtotal - discount).clamp(0, subtotal).toInt();
+      final currency =
+          _currencyCode ??
+          ref.read(localContextProvider).asData?.value.currencyCode ??
+          'USD';
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder:
+            (dialogContext) => AlertDialog(
+              title: const Text('تأكيد اعتماد الفاتورة'),
+              content: Container(
+                width: shortages.isEmpty ? 320 : 440,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'إجمالي الفاتورة',
+                      style: TextStyle(color: context.colors.textSecondary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _formatMoney(context, total, currency),
+                      style: TextStyle(
+                        color: context.colors.primary,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('${_lines.length} بند جاهز للاعتماد'),
+                    if (shortages.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: context.colors.warning.withValues(alpha: .10),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: context.colors.warning.withValues(
+                              alpha: .35,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: context.colors.warning,
+                                  size: 19,
+                                ),
+                                const SizedBox(width: 7),
+                                const Expanded(
+                                  child: Text(
+                                    'هذه الفاتورة ستجعل المخزون سالبًا',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            for (final shortage in shortages)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 5),
+                                child: Text(
+                                  '${shortage.productName}: المتاح '
+                                  '${shortage.availableBaseQuantity.toStringAsFixed(2)}، '
+                                  'بعد البيع '
+                                  '${shortage.resultingBaseQuantity.toStringAsFixed(2)}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('رجوع'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  icon: const Icon(Icons.check_rounded),
+                  label: Text(
+                    shortages.isEmpty ? 'حفظ واعتماد' : 'بيع رغم النقص',
+                  ),
+                ),
+              ],
+            ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    _autoSaveTimer?.cancel();
+    final activeAutoSave = _activeAutoSave;
+    if (activeAutoSave != null) await activeAutoSave;
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
-      final repo = ref.read(documentRepositoryProvider);
       if (_isWaste) {
         await repo.postWaste(
           note: _note.text.trim().isEmpty ? null : _note.text.trim(),
@@ -2535,58 +3295,127 @@ class _InvoiceEditorState extends ConsumerState<_InvoiceEditor> {
                   .toList(),
         );
       } else if (_isPurchase) {
-        final id = await repo.createPurchaseDraft(
-          supplierId: _partyId!,
-          cashboxId: _cashboxId,
-          discountMinor: Money.fromMajor(_documentDiscount.text),
-          paidMinor: Money.fromMajor(_paid.text),
-          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
-          items:
-              _lines
-                  .map(
-                    (line) => PurchaseLineInput(
-                      inventoryItemId: line.inventoryItemId,
-                      productUnitId: line.productUnitId,
-                      quantity: line.quantity,
-                      unitFactor: line.unitFactor,
-                      unitCostMinor: line.unitPriceMinor,
-                      lineDiscountMinor: line.lineDiscountMinor,
-                    ),
-                  )
-                  .toList(),
+        final purchaseItems = _purchaseInputs();
+        final foreignSubtotal = _lines.fold<int>(
+          0,
+          (sum, line) => sum + line.lineTotalMinor,
         );
+        final foreignDiscount = Money.fromMajor(_documentDiscount.text);
+        final foreignPaid = Money.fromMajor(_paid.text);
+        if (foreignDiscount < 0 || foreignDiscount > foreignSubtotal) {
+          throw const FormatException('خصم الفاتورة غير صالح');
+        }
+        final baseSubtotal = purchaseItems.fold<int>(
+          0,
+          (sum, item) => sum + item.lineTotalMinor,
+        );
+        var baseDiscount = _toBaseMinor(foreignDiscount);
+        baseDiscount = baseDiscount.clamp(0, baseSubtotal).toInt();
+        final foreignFinal = foreignSubtotal - foreignDiscount;
+        if (foreignPaid < 0 || foreignPaid > foreignFinal) {
+          throw const FormatException('قيمة الدفعة أكبر من إجمالي الفاتورة');
+        }
+        final baseFinal =
+            (baseSubtotal - baseDiscount).clamp(0, baseSubtotal).toInt();
+        final basePaid =
+            foreignPaid == foreignFinal
+                ? baseFinal
+                : _toBaseMinor(foreignPaid).clamp(0, baseFinal).toInt();
+        if (_draftId == null) {
+          _draftId = await repo.createPurchaseDraft(
+            supplierId: _partyId!,
+            cashboxId: _cashboxId,
+            discountMinor: baseDiscount,
+            paidMinor: basePaid,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            items: purchaseItems,
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: foreignSubtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaid,
+          );
+        } else {
+          await repo.updatePurchaseDraft(
+            purchaseId: _draftId!,
+            supplierId: _partyId!,
+            cashboxId: _cashboxId,
+            discountMinor: baseDiscount,
+            paidMinor: basePaid,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            items: purchaseItems,
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: foreignSubtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaid,
+          );
+        }
+        final id = _draftId!;
         if (post) await repo.postPurchase(id);
       } else {
         final subtotal = _lines.fold<int>(
           0,
           (sum, line) => sum + line.lineTotalMinor,
         );
-        final discount = Money.fromMajor(_documentDiscount.text);
-        final finalMinor = subtotal - discount;
-        var paidMinor = Money.fromMajor(_paid.text);
-        if (_partyId == null) paidMinor = finalMinor;
-        final id = await repo.createSaleDraft(
-          partyId: _partyId,
-          cashboxId: _cashboxId,
-          discountMinor: discount,
-          paidMinor: paidMinor,
-          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
-          items:
-              _lines
-                  .map(
-                    (line) => SaleLineInput(
-                      inventoryItemId: line.inventoryItemId,
-                      productUnitId: line.productUnitId,
-                      quantity: line.quantity,
-                      unitFactor: line.unitFactor,
-                      unitPriceMinor: line.unitPriceMinor,
-                      lineDiscountMinor: line.lineDiscountMinor,
-                    ),
-                  )
-                  .toList(),
+        final foreignDiscount = Money.fromMajor(_documentDiscount.text);
+        if (foreignDiscount < 0 || foreignDiscount > subtotal) {
+          throw const FormatException('خصم الفاتورة غير صالح');
+        }
+        final foreignFinalMinor = subtotal - foreignDiscount;
+        var foreignPaidMinor = Money.fromMajor(_paid.text);
+        if (_partyId == null) foreignPaidMinor = foreignFinalMinor;
+        if (foreignPaidMinor < 0 || foreignPaidMinor > foreignFinalMinor) {
+          throw const FormatException('قيمة الدفعة أكبر من إجمالي الفاتورة');
+        }
+        var discount = _toBaseMinor(foreignDiscount);
+        final baseSubtotal = saleItems.fold<int>(
+          0,
+          (sum, item) => sum + item.lineTotalMinor,
         );
-        if (post) await repo.postSale(id);
+        discount = discount.clamp(0, baseSubtotal).toInt();
+        final baseFinal =
+            (baseSubtotal - discount).clamp(0, baseSubtotal).toInt();
+        final paidMinor =
+            foreignPaidMinor == foreignFinalMinor
+                ? baseFinal
+                : _toBaseMinor(foreignPaidMinor).clamp(0, baseFinal).toInt();
+        if (_draftId == null) {
+          _draftId = await repo.createSaleDraft(
+            partyId: _partyId,
+            cashboxId: _cashboxId,
+            discountMinor: discount,
+            paidMinor: paidMinor,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            items: saleItems,
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: subtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaidMinor,
+          );
+        } else {
+          await repo.updateSaleDraft(
+            saleId: _draftId!,
+            partyId: _partyId,
+            cashboxId: _cashboxId,
+            discountMinor: discount,
+            paidMinor: paidMinor,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            items: saleItems,
+            currencyCode: _currencyCode,
+            exchangeRateMicros: _exchangeRateMicros,
+            foreignSubtotalMinor: subtotal,
+            foreignDiscountMinor: foreignDiscount,
+            foreignPaidMinor: foreignPaidMinor,
+          );
+        }
+        final id = _draftId!;
+        if (post) {
+          await repo.postSale(id, allowNegativeStock: shortages.isNotEmpty);
+        }
       }
+      if (post) _draftId = null;
       ref.read(dataRevisionProvider.notifier).state++;
       if (mounted) {
         _markClean();
@@ -2937,9 +3766,11 @@ class _EditorData {
     required this.warehouses,
     required this.parties,
     required this.cashboxes,
+    required this.currencies,
   });
 
   final List<Warehouse> warehouses;
   final List<Party> parties;
   final List<Cashbox> cashboxes;
+  final List<EntityCurrency> currencies;
 }

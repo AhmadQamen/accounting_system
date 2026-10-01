@@ -86,7 +86,7 @@ class SyncScreen extends ConsumerWidget {
                                   ? (constraints.maxWidth - 36) / 4
                                   : constraints.maxWidth >= 560
                                   ? (constraints.maxWidth - 12) / 2
-                                  : constraints.maxWidth;
+                                  : (constraints.maxWidth - 12) / 2;
                           return Wrap(
                             spacing: 12,
                             runSpacing: 12,
@@ -360,7 +360,10 @@ class _OperationActions extends ConsumerWidget {
           onPressed: () => _showPayload(context, item.payloadJson!),
           icon: const Icon(Iconsax.code, size: 18),
         ),
-      if (item.isFailed)
+      // Only transient failures are retryable. A server rejection means the
+      // payload itself must be corrected first; repeatedly sending it only
+      // recreates the same error.
+      if (item.status == 'failed')
         IconButton(
           tooltip: 'إعادة المحاولة',
           onPressed: () async {

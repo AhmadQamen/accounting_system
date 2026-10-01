@@ -5,6 +5,7 @@ import 'package:accounting_system/core/domain/money.dart';
 import 'package:accounting_system/core/db/local_context.dart';
 import 'package:accounting_system/core/services/inventory_ledger_service.dart';
 import 'package:accounting_system/core/services/outbox_service.dart';
+import 'package:accounting_system/core/services/general_ledger_service.dart';
 import 'package:accounting_system/features/inventory/models/inventory_models.dart';
 
 class InventoryRepository {
@@ -12,6 +13,7 @@ class InventoryRepository {
   final AppDatabase _database;
   final _ledger = const InventoryLedgerService();
   final _outbox = const OutboxService();
+  final _generalLedger = const GeneralLedgerService();
 
   Future<List<InventoryItem>> listInventory({
     String search = '',
@@ -144,6 +146,34 @@ ORDER BY p.name COLLATE NOCASE
         createdBy: ctx.userId,
         originDeviceId: ctx.deviceId,
       );
+      if (totalValueMinor > 0) {
+        final inventoryAccount = await _generalLedger.ensureWarehouseAccount(
+          txn,
+          entityId: ctx.entityId,
+          warehouseId: warehouseId,
+        );
+        final equityAccount = await _requiredAccount(txn, ctx.entityId, '320');
+        await _generalLedger.postEntryWithAccountIds(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          sourceType: 'inventory_opening',
+          sourceId: referenceId,
+          occurredAt: DateTime.now().toUtc(),
+          lines: [
+            (
+              accountId: inventoryAccount,
+              amountMinor: totalValueMinor,
+              isDebit: true,
+            ),
+            (
+              accountId: equityAccount,
+              amountMinor: totalValueMinor,
+              isDebit: false,
+            ),
+          ],
+        );
+      }
       await _outbox.enqueueEvent(
         txn,
         entityId: ctx.entityId,
@@ -191,6 +221,8 @@ ORDER BY p.name COLLATE NOCASE
         'ADJ-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
     await _database.transaction((txn) async {
       final payloadItems = <Map<String, Object?>>[];
+      var increasesMinor = 0;
+      var decreasesMinor = 0;
       await txn.insert('inventory_adjustments', {
         'id': id,
         'entity_id': ctx.entityId,
@@ -225,6 +257,11 @@ ORDER BY p.name COLLATE NOCASE
         final valueDelta =
             Money.multiplyByQuantity(average, delta.abs()) *
             (delta < 0 ? -1 : 1);
+        if (valueDelta > 0) {
+          increasesMinor += valueDelta;
+        } else {
+          decreasesMinor += -valueDelta;
+        }
         final itemId = uuid.v4();
         await txn.insert('inventory_adjustment_items', {
           'id': itemId,
@@ -275,6 +312,54 @@ ORDER BY p.name COLLATE NOCASE
         where: 'id = ?',
         whereArgs: [id],
       );
+      if (increasesMinor > 0 || decreasesMinor > 0) {
+        final inventoryAccount = await _generalLedger.ensureWarehouseAccount(
+          txn,
+          entityId: ctx.entityId,
+          warehouseId: warehouseId,
+        );
+        final adjustmentAccount = await _requiredAccount(
+          txn,
+          ctx.entityId,
+          '320',
+        );
+        final lossAccount = await _requiredAccount(txn, ctx.entityId, '540');
+        await _generalLedger.postEntryWithAccountIds(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          sourceType: 'inventory_adjustment',
+          sourceId: id,
+          occurredAt: now,
+          note: note,
+          lines: [
+            if (increasesMinor > 0)
+              (
+                accountId: inventoryAccount,
+                amountMinor: increasesMinor,
+                isDebit: true,
+              ),
+            if (decreasesMinor > 0)
+              (
+                accountId: lossAccount,
+                amountMinor: decreasesMinor,
+                isDebit: true,
+              ),
+            if (increasesMinor > 0)
+              (
+                accountId: adjustmentAccount,
+                amountMinor: increasesMinor,
+                isDebit: false,
+              ),
+            if (decreasesMinor > 0)
+              (
+                accountId: inventoryAccount,
+                amountMinor: decreasesMinor,
+                isDebit: false,
+              ),
+          ],
+        );
+      }
       await _outbox.enqueueEvent(
         txn,
         entityId: ctx.entityId,
@@ -312,6 +397,7 @@ ORDER BY p.name COLLATE NOCASE
         'TRF-${ctx.deviceId.substring(0, 4).toUpperCase()}-${now.microsecondsSinceEpoch}';
     await _database.transaction((txn) async {
       final payloadItems = <Map<String, Object?>>[];
+      var totalTransferValueMinor = 0;
       await txn.insert('inventory_transfers', {
         'id': id,
         'entity_id': ctx.entityId,
@@ -358,6 +444,7 @@ ORDER BY p.name COLLATE NOCASE
                   sourceQty,
                 );
         final value = Money.multiplyByQuantity(average, input.baseQuantity);
+        totalTransferValueMinor += value;
         final itemId = uuid.v4();
         await txn.insert('inventory_transfer_items', {
           'id': itemId,
@@ -422,6 +509,39 @@ ORDER BY p.name COLLATE NOCASE
         where: 'id = ?',
         whereArgs: [id],
       );
+      if (totalTransferValueMinor > 0) {
+        final fromAccount = await _generalLedger.ensureWarehouseAccount(
+          txn,
+          entityId: ctx.entityId,
+          warehouseId: fromWarehouseId,
+        );
+        final toAccount = await _generalLedger.ensureWarehouseAccount(
+          txn,
+          entityId: ctx.entityId,
+          warehouseId: toWarehouseId,
+        );
+        await _generalLedger.postEntryWithAccountIds(
+          txn,
+          entityId: ctx.entityId,
+          financialYearId: ctx.financialYearId,
+          sourceType: 'inventory_transfer',
+          sourceId: id,
+          occurredAt: now,
+          note: note,
+          lines: [
+            (
+              accountId: toAccount,
+              amountMinor: totalTransferValueMinor,
+              isDebit: true,
+            ),
+            (
+              accountId: fromAccount,
+              amountMinor: totalTransferValueMinor,
+              isDebit: false,
+            ),
+          ],
+        );
+      }
       await _outbox.enqueueEvent(
         txn,
         entityId: ctx.entityId,
@@ -490,5 +610,16 @@ HAVING ABS(i.current_quantity - COALESCE(SUM(m.quantity_delta),0)) > 0.000001
       mismatchCount: mismatches.length,
       details: jsonEncode(mismatches),
     );
+  }
+
+  Future<String> _requiredAccount(
+    dynamic db,
+    String entityId,
+    String code,
+  ) async {
+    await _generalLedger.ensureDefaultAccounts(db, entityId);
+    final id = await _generalLedger.accountId(db, entityId, code);
+    if (id == null) throw StateError('الحساب $code غير موجود');
+    return id;
   }
 }

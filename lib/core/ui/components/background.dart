@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:accounting_system/core/theme/theme_extension.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class AmbientBackground extends StatefulWidget {
@@ -12,14 +13,17 @@ class AmbientBackground extends StatefulWidget {
 class _AmbientBackgroundState extends State<AmbientBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final bool _animate;
 
   @override
   void initState() {
     super.initState();
+    _animate = !kIsWeb && defaultTargetPlatform != TargetPlatform.android;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 14),
-    )..repeat();
+    );
+    if (_animate) _controller.repeat();
   }
 
   @override
@@ -42,34 +46,30 @@ class _AmbientBackgroundState extends State<AmbientBackground>
                   begin: Alignment.topRight,
                   end: Alignment.bottomLeft,
                   colors: [
-                    colors.secondary.withValues(alpha: .10),
+                    colors.bgDeep,
                     colors.bgPage,
-                    colors.primary.withValues(alpha: .08),
+                    colors.primary.withValues(alpha: .13),
                   ],
                 ),
               ),
             ),
             // 📒 شبكة دفتر الحسابات + منحنى النمو + توهج ناعم متحرك
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                return CustomPaint(
-                  painter: _LedgerPainter(
-                    progress: _controller.value,
-                    primary: colors.primary,
-                    secondary: colors.secondary,
-                    success: colors.success,
-                    lineColor: colors.textPrimary,
-                  ),
-                  size: Size.infinite,
-                );
-              },
-            ),
+            _animate
+                ? AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) => _ledgerCanvas(colors, _controller.value),
+                  )
+                : RepaintBoundary(child: _ledgerCanvas(colors, 0)),
           ],
         ),
       ),
     );
   }
+
+  Widget _ledgerCanvas(dynamic colors, double progress) => CustomPaint(
+    painter: _LedgerPainter(progress: progress, primary: colors.primary, secondary: colors.secondary, success: colors.success, lineColor: colors.textPrimary),
+    size: Size.infinite,
+  );
 }
 
 class _LedgerPainter extends CustomPainter {
@@ -90,15 +90,52 @@ class _LedgerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     _paintLedgerGrid(canvas, size);
+    _paintJournalColumns(canvas, size);
     _paintGrowthCurve(canvas, size);
     _paintGlowOrbs(canvas, size);
+  }
+
+  /// إشارات دفتر الأستاذ: أعمدة مدين/دائن وأعمدة مالية هادئة في الخلفية.
+  void _paintJournalColumns(Canvas canvas, Size size) {
+    final line =
+        Paint()
+          ..color = lineColor.withValues(alpha: .075)
+          ..strokeWidth = 1;
+    final columns = [size.width * .58, size.width * .74, size.width * .90];
+    for (final x in columns) {
+      canvas.drawLine(
+        Offset(x, size.height * .12),
+        Offset(x, size.height * .48),
+        line,
+      );
+    }
+    for (var row = 0; row < 5; row++) {
+      final y = size.height * (.17 + row * .06);
+      canvas.drawLine(
+        Offset(size.width * .46, y),
+        Offset(size.width * .96, y),
+        line,
+      );
+    }
+    final barPaint = Paint()..color = lineColor.withValues(alpha: .07);
+    for (var index = 0; index < 5; index++) {
+      final height = 18.0 + (index % 3) * 14;
+      final left = size.width * (.18 + index * .045);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(left, size.height * .24 - height, 14, height),
+          const Radius.circular(4),
+        ),
+        barPaint,
+      );
+    }
   }
 
   /// خطوط دفتر الحسابات — أفقية وعمودية خفيفة جداً
   void _paintLedgerGrid(Canvas canvas, Size size) {
     final paint =
         Paint()
-          ..color = lineColor.withValues(alpha: .025)
+          ..color = lineColor.withValues(alpha: .045)
           ..strokeWidth = .6;
 
     const gap = 42.0;
@@ -112,7 +149,7 @@ class _LedgerPainter extends CustomPainter {
     // خط هامش بستايل الدفاتر المحاسبية التقليدية
     final marginPaint =
         Paint()
-          ..color = primary.withValues(alpha: .07)
+          ..color = lineColor.withValues(alpha: .10)
           ..strokeWidth = 1;
     canvas.drawLine(
       Offset(size.width * .12, 0),
@@ -145,7 +182,7 @@ class _LedgerPainter extends CustomPainter {
 
     final linePaint =
         Paint()
-          ..color = success.withValues(alpha: .10)
+          ..color = lineColor.withValues(alpha: .14)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2
           ..strokeCap = StrokeCap.round;
@@ -163,14 +200,14 @@ class _LedgerPainter extends CustomPainter {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              success.withValues(alpha: .07),
+              lineColor.withValues(alpha: .08),
               success.withValues(alpha: 0),
             ],
           ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawPath(fillPath, fillPaint);
 
     // نقاط صغيرة على المنحنى (محطات بيانات)
-    final dotPaint = Paint()..color = success.withValues(alpha: .18);
+    final dotPaint = Paint()..color = lineColor.withValues(alpha: .20);
     for (final p in [points[2], points[4], points[6]]) {
       canvas.drawCircle(p, 3, dotPaint);
     }
@@ -185,19 +222,19 @@ class _LedgerPainter extends CustomPainter {
       final r = radius * (0.85 + pulse * 0.15);
       final paint =
           Paint()
-            ..color = color.withValues(alpha: .05 + pulse * .03)
+            ..color = color.withValues(alpha: .08 + pulse * .05)
             ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * .6);
       canvas.drawCircle(center, r, paint);
     }
 
-    orb(Offset(size.width * .82, size.height * .18), 120, primary, 0);
+    orb(Offset(size.width * .82, size.height * .18), 120, lineColor, 0);
     orb(
       Offset(size.width * .10, size.height * .85),
       140,
-      secondary,
+      lineColor,
       math.pi / 2,
     );
-    orb(Offset(size.width * .55, size.height * .45), 100, success, math.pi);
+    orb(Offset(size.width * .55, size.height * .45), 100, lineColor, math.pi);
   }
 
   @override

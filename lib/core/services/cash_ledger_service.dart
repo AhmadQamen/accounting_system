@@ -12,6 +12,9 @@ class CashLedgerService {
     required String direction,
     required String kind,
     required int amountMinor,
+    String? currencyCode,
+    int exchangeRateMicros = 1000000,
+    int? foreignAmountMinor,
     required String referenceType,
     required String referenceId,
     String? cashSessionId,
@@ -38,7 +41,8 @@ class CashLedgerService {
         orderBy: 'opened_at DESC',
         limit: 1,
       );
-      if (openSessions.isNotEmpty) effectiveSessionId = openSessions.first['id'] as String;
+      if (openSessions.isNotEmpty)
+        effectiveSessionId = openSessions.first['id'] as String;
     }
     await db.insert('transactions', {
       'id': id,
@@ -50,6 +54,9 @@ class CashLedgerService {
       'direction': direction,
       'kind': kind,
       'amount_minor': amountMinor,
+      'currency_code': currencyCode,
+      'exchange_rate_micros': exchangeRateMicros,
+      'foreign_amount_minor': foreignAmountMinor,
       'reference_type': referenceType,
       'reference_id': referenceId,
       'reversal_of_id': reversalOfId,
@@ -70,7 +77,10 @@ class CashLedgerService {
     return id;
   }
 
-  Future<int> rebuildCashboxBalance(DatabaseExecutor db, String cashboxId) async {
+  Future<int> rebuildCashboxBalance(
+    DatabaseExecutor db,
+    String cashboxId,
+  ) async {
     final rows = await db.rawQuery(
       '''SELECT COALESCE(SUM(CASE direction WHEN 'in' THEN amount_minor ELSE -amount_minor END),0) AS balance
          FROM transactions WHERE cashbox_id = ?''',

@@ -10,20 +10,45 @@ class ReportsRepository {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final today = DateTime.now().toUtc();
-    final start = DateTime.utc(today.year, today.month, today.day).toIso8601String();
+    final start =
+        DateTime.utc(today.year, today.month, today.day).toIso8601String();
     Future<int> scalar(String sql, [List<Object?> args = const []]) async {
       final rows = await db.rawQuery(sql, args);
       return (rows.first.values.first as num?)?.toInt() ?? 0;
     }
 
-    final cash = await scalar('SELECT COALESCE(SUM(current_balance_minor),0) FROM cashboxes WHERE entity_id=? AND deleted_at IS NULL', [ctx.entityId]);
-    final sales = await scalar("SELECT COALESCE(SUM(final_minor),0) FROM sales WHERE entity_id=? AND status='posted' AND occurred_at>=?", [ctx.entityId, start]);
-    final purchases = await scalar("SELECT COALESCE(SUM(final_minor),0) FROM purchase_invoices WHERE entity_id=? AND status='posted' AND occurred_at>=?", [ctx.entityId, start]);
-    final customerReceivables = await scalar("SELECT COALESCE(SUM(CASE WHEN current_balance_minor>0 THEN current_balance_minor ELSE 0 END),0) FROM parties WHERE entity_id=? AND deleted_at IS NULL", [ctx.entityId]);
-    final supplierPayables = await scalar("SELECT COALESCE(SUM(CASE WHEN current_balance_minor<0 THEN -current_balance_minor ELSE 0 END),0) FROM parties WHERE entity_id=? AND deleted_at IS NULL", [ctx.entityId]);
-    final inventoryValue = await scalar('SELECT COALESCE(SUM(inventory_value_minor),0) FROM inventory_items WHERE entity_id=?', [ctx.entityId]);
-    final lowStock = await scalar('''SELECT COUNT(*) FROM inventory_items i JOIN products p ON p.id=i.product_id WHERE i.entity_id=? AND p.min_quantity>0 AND i.current_quantity<=p.min_quantity''', [ctx.entityId]);
-    final pendingSync = await scalar("SELECT COUNT(*) FROM sync_outbox WHERE entity_id=? AND status IN ('pending','failed')", [ctx.entityId]);
+    final cash = await scalar(
+      'SELECT COALESCE(SUM(current_balance_minor),0) FROM cashboxes WHERE entity_id=? AND deleted_at IS NULL',
+      [ctx.entityId],
+    );
+    final sales = await scalar(
+      "SELECT COALESCE(SUM(final_minor),0) FROM sales WHERE entity_id=? AND status='posted' AND occurred_at>=?",
+      [ctx.entityId, start],
+    );
+    final purchases = await scalar(
+      "SELECT COALESCE(SUM(final_minor),0) FROM purchase_invoices WHERE entity_id=? AND status='posted' AND occurred_at>=?",
+      [ctx.entityId, start],
+    );
+    final customerReceivables = await scalar(
+      "SELECT COALESCE(SUM(CASE WHEN current_balance_minor>0 THEN current_balance_minor ELSE 0 END),0) FROM parties WHERE entity_id=? AND deleted_at IS NULL",
+      [ctx.entityId],
+    );
+    final supplierPayables = await scalar(
+      "SELECT COALESCE(SUM(CASE WHEN current_balance_minor<0 THEN -current_balance_minor ELSE 0 END),0) FROM parties WHERE entity_id=? AND deleted_at IS NULL",
+      [ctx.entityId],
+    );
+    final inventoryValue = await scalar(
+      'SELECT COALESCE(SUM(inventory_value_minor),0) FROM inventory_items WHERE entity_id=?',
+      [ctx.entityId],
+    );
+    final lowStock = await scalar(
+      '''SELECT COUNT(*) FROM inventory_items i JOIN products p ON p.id=i.product_id WHERE i.entity_id=? AND p.min_quantity>0 AND i.current_quantity<=p.min_quantity''',
+      [ctx.entityId],
+    );
+    final pendingSync = await scalar(
+      "SELECT COUNT(*) FROM sync_outbox WHERE entity_id=? AND status IN ('pending','failed')",
+      [ctx.entityId],
+    );
     return DashboardMetrics(
       cash: cash,
       salesToday: sales,
@@ -41,7 +66,8 @@ class ReportsRepository {
     final db = await _database.database;
     final fromText = from.toUtc().toIso8601String();
     final toText = to.toUtc().toIso8601String();
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT COALESCE(SUM(s.final_minor),0) gross_sales,
        COALESCE(SUM(s.discount_minor),0) discounts,
        COALESCE((SELECT SUM(r.final_minor) FROM sale_return_invoices r WHERE r.entity_id=? AND r.status='posted' AND r.occurred_at>=? AND r.occurred_at<?),0) returns,
@@ -50,8 +76,101 @@ SELECT COALESCE(SUM(s.final_minor),0) gross_sales,
        COUNT(s.id) invoice_count
 FROM sales s
 WHERE s.entity_id=? AND s.status='posted' AND s.occurred_at>=? AND s.occurred_at<?
-''', [ctx.entityId, fromText, toText, ctx.entityId, fromText, toText, ctx.entityId, fromText, toText, ctx.entityId, fromText, toText]);
+''',
+      [
+        ctx.entityId,
+        fromText,
+        toText,
+        ctx.entityId,
+        fromText,
+        toText,
+        ctx.entityId,
+        fromText,
+        toText,
+        ctx.entityId,
+        fromText,
+        toText,
+      ],
+    );
     return SalesReport.fromSql(rows.first);
+  }
+
+  Future<List<SalesInvoiceProfitRow>> salesInvoiceProfitability(
+    DateTime from,
+    DateTime to,
+  ) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final rows = await db.rawQuery(
+      '''
+SELECT s.id, s.invoice_number, s.occurred_at, p.name party_name,
+       s.final_minor - COALESCE((
+         SELECT SUM(r.final_minor)
+         FROM sale_return_invoices r
+         WHERE r.entity_id=s.entity_id AND r.sale_id=s.id
+           AND r.status='posted' AND r.deleted_at IS NULL
+       ), 0) sales_minor,
+       COALESCE((
+         SELECT SUM(si.cost_amount_minor)
+         FROM sale_items si
+         WHERE si.entity_id=s.entity_id AND si.sale_id=s.id
+       ), 0) - COALESCE((
+         SELECT SUM(ri.cost_amount_minor)
+         FROM sale_return_items ri
+         JOIN sale_return_invoices r ON r.id=ri.sale_return_invoice_id
+         WHERE r.entity_id=s.entity_id AND r.sale_id=s.id
+           AND r.status='posted' AND r.deleted_at IS NULL
+       ), 0) cost_minor
+FROM sales s
+LEFT JOIN parties p ON p.id=s.party_id AND p.entity_id=s.entity_id
+WHERE s.entity_id=? AND s.status='posted' AND s.deleted_at IS NULL
+  AND s.occurred_at>=? AND s.occurred_at<?
+ORDER BY s.occurred_at DESC, s.invoice_number DESC
+''',
+      [
+        ctx.entityId,
+        from.toUtc().toIso8601String(),
+        to.toUtc().toIso8601String(),
+      ],
+    );
+    return rows.map(SalesInvoiceProfitRow.fromSql).toList(growable: false);
+  }
+
+  Future<List<PartyInvoiceReportRow>> partyInvoices(String partyId) async {
+    final ctx = await LocalContextService.instance.current;
+    final db = await _database.database;
+    final rows = await db.rawQuery(
+      '''
+SELECT * FROM (
+ SELECT id, 'sale' type, invoice_number number, status, occurred_at,
+        final_minor total_minor, paid_minor paid_minor
+ FROM sales WHERE entity_id=? AND party_id=? AND deleted_at IS NULL
+ UNION ALL
+ SELECT id, 'purchase' type, invoice_number number, status, occurred_at,
+        final_minor total_minor, paid_minor paid_minor
+ FROM purchase_invoices WHERE entity_id=? AND party_id=? AND deleted_at IS NULL
+ UNION ALL
+ SELECT id, 'sale_return' type, return_number number, status, occurred_at,
+        final_minor total_minor, refunded_minor paid_minor
+ FROM sale_return_invoices WHERE entity_id=? AND party_id=? AND deleted_at IS NULL
+ UNION ALL
+ SELECT id, 'purchase_return' type, return_number number, status, occurred_at,
+        final_minor total_minor, refunded_minor paid_minor
+ FROM purchase_return_invoices WHERE entity_id=? AND party_id=? AND deleted_at IS NULL
+) ORDER BY occurred_at DESC, number DESC
+''',
+      [
+        ctx.entityId,
+        partyId,
+        ctx.entityId,
+        partyId,
+        ctx.entityId,
+        partyId,
+        ctx.entityId,
+        partyId,
+      ],
+    );
+    return rows.map(PartyInvoiceReportRow.fromSql).toList(growable: false);
   }
 
   Future<PurchasesReport> purchasesReport(DateTime from, DateTime to) async {
@@ -59,18 +178,23 @@ WHERE s.entity_id=? AND s.status='posted' AND s.occurred_at>=? AND s.occurred_at
     final db = await _database.database;
     final fromText = from.toUtc().toIso8601String();
     final toText = to.toUtc().toIso8601String();
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT COALESCE(SUM(p.final_minor),0) gross_purchases,
        COALESCE(SUM(p.discount_minor),0) discounts,
        COALESCE((SELECT SUM(r.final_minor) FROM purchase_return_invoices r WHERE r.entity_id=? AND r.status='posted' AND r.occurred_at>=? AND r.occurred_at<?),0) returns,
        COUNT(p.id) invoice_count
 FROM purchase_invoices p
 WHERE p.entity_id=? AND p.status='posted' AND p.occurred_at>=? AND p.occurred_at<?
-''', [ctx.entityId, fromText, toText, ctx.entityId, fromText, toText]);
+''',
+      [ctx.entityId, fromText, toText, ctx.entityId, fromText, toText],
+    );
     return PurchasesReport.fromSql(rows.first);
   }
 
-  Future<List<InventoryBalanceReport>> inventoryBalances({String search = ''}) async {
+  Future<List<InventoryBalanceReport>> inventoryBalances({
+    String search = '',
+  }) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final args = <Object?>[ctx.entityId];
@@ -120,33 +244,46 @@ ORDER BY p.name COLLATE NOCASE, w.name COLLATE NOCASE
   Future<CashFlowReport> cashFlowReport(DateTime from, DateTime to) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount_minor ELSE 0 END),0) total_in,
        COALESCE(SUM(CASE WHEN direction='out' THEN amount_minor ELSE 0 END),0) total_out,
        COALESCE(SUM(CASE WHEN direction='in' THEN amount_minor ELSE -amount_minor END),0) net_flow,
        COALESCE(SUM(CASE WHEN kind='expense' THEN amount_minor ELSE 0 END),0) expenses
 FROM transactions
 WHERE entity_id=? AND occurred_at>=? AND occurred_at<?
-''', [ctx.entityId, from.toUtc().toIso8601String(), to.toUtc().toIso8601String()]);
+''',
+      [
+        ctx.entityId,
+        from.toUtc().toIso8601String(),
+        to.toUtc().toIso8601String(),
+      ],
+    );
     return CashFlowReport.fromSql(rows.first);
   }
-
 
   Future<DashboardTrends> dashboardTrends({int days = 7}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
     final today = DateTime.now().toUtc();
-    final start = DateTime.utc(today.year, today.month, today.day).subtract(Duration(days: days - 1));
+    final start = DateTime.utc(
+      today.year,
+      today.month,
+      today.day,
+    ).subtract(Duration(days: days - 1));
     final fromText = start.toIso8601String();
 
     Future<List<DailyTotal>> grouped(String table) async {
-      final rows = await db.rawQuery('''
+      final rows = await db.rawQuery(
+        '''
 SELECT substr(occurred_at, 1, 10) day, COALESCE(SUM(final_minor),0) total
 FROM $table
 WHERE entity_id=? AND status='posted' AND occurred_at>=?
 GROUP BY substr(occurred_at, 1, 10)
 ORDER BY day
-''', [ctx.entityId, fromText]);
+''',
+        [ctx.entityId, fromText],
+      );
       return rows.map(DailyTotal.fromSql).toList(growable: false);
     }
 
@@ -155,7 +292,10 @@ ORDER BY day
     final salesValues = <int>[];
     final purchaseValues = <int>[];
     for (var i = 0; i < days; i++) {
-      final day = start.add(Duration(days: i)).toIso8601String().substring(0, 10);
+      final day = start
+          .add(Duration(days: i))
+          .toIso8601String()
+          .substring(0, 10);
       salesValues.add(_totalForDay(sales, day));
       purchaseValues.add(_totalForDay(purchases, day));
     }
@@ -165,7 +305,8 @@ ORDER BY day
   Future<List<ActivityItem>> recentActivity({int limit = 7}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT * FROM (
   SELECT 'sale' kind, s.id id, s.invoice_number display_number,
          s.final_minor amount_minor, s.occurred_at occurred_at,
@@ -189,14 +330,17 @@ SELECT * FROM (
 )
 ORDER BY occurred_at DESC
 LIMIT ?
-''', [ctx.entityId, ctx.entityId, ctx.entityId, limit]);
+''',
+      [ctx.entityId, ctx.entityId, ctx.entityId, limit],
+    );
     return rows.map(ActivityItem.fromSql).toList(growable: false);
   }
 
   Future<List<LowStockItem>> lowStockItems({int limit = 5}) async {
     final ctx = await LocalContextService.instance.current;
     final db = await _database.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT p.id product_id, p.name product_name, w.name warehouse_name,
        i.current_quantity, p.min_quantity
 FROM inventory_items i
@@ -207,10 +351,17 @@ WHERE i.entity_id=? AND p.deleted_at IS NULL AND w.deleted_at IS NULL
 ORDER BY (i.current_quantity / CASE WHEN p.min_quantity=0 THEN 1 ELSE p.min_quantity END) ASC,
          p.name COLLATE NOCASE
 LIMIT ?
-''', [ctx.entityId, limit]);
+''',
+      [ctx.entityId, limit],
+    );
     return rows.map(LowStockItem.fromSql).toList(growable: false);
   }
-  Future<DashboardData> dashboardData({int trendDays = 7, int activityLimit = 7, int lowStockLimit = 5}) async {
+
+  Future<DashboardData> dashboardData({
+    int trendDays = 7,
+    int activityLimit = 7,
+    int lowStockLimit = 5,
+  }) async {
     final metricsFuture = dashboard();
     final trendsFuture = dashboardTrends(days: trendDays);
     final activityFuture = recentActivity(limit: activityLimit);
@@ -238,5 +389,4 @@ LIMIT ?
     }
     return 0;
   }
-
 }
